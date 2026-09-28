@@ -160,3 +160,12 @@ cc_test {
     srcs: ["PicoDisplayConfig_probe.cpp"],
     shared_libs: ["libbinder", "libgui", "libutils", "liblog"],
 }
+
+cc_test {
+    name: "picomisu_cached_buffer_probe",
+    gtest: false,
+    compile_multilib: "both",
+    cflags: ["-Wall", "-Werror"],
+    srcs: ["PicoCachedBuffer_probe.cpp"],
+    shared_libs: ["libbinder", "libgui", "libui", "libutils", "liblog"],
+}

@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <atomic>
 #include <inttypes.h>
 
 #define LOG_TAG "BufferQueueProducer"
@@ -799,6 +800,79 @@ status_t BufferQueueProducer::attachBuffer(int* outSlot,
     return returnFlags;
 }
 
+namespace {
+// Factory uses a process-wide access counter. Atomic ordering also covers
+// accesses protected by different BufferQueueCore mutexes.
+std::atomic<uint64_t> sBufferCacheAccess{0};
+}
+
+status_t BufferQueueProducer::queryBufferLocked(uint64_t id) {
+    return mBufferCache.count(id) ? ALREADY_EXISTS : NAME_NOT_FOUND;
+}
+
+void BufferQueueProducer::fetchBufferLocked(uint64_t id, sp<GraphicBuffer>* buffer) {
+    const auto entry = mBufferCache.find(id);
+    if (entry == mBufferCache.end()) {
+        buffer->clear();
+        return;
+    }
+    entry->second.second = sBufferCacheAccess.fetch_add(1, std::memory_order_relaxed);
+    *buffer = entry->second.first;
+}
+
+void BufferQueueProducer::evictBuffer() {
+    if (mBufferCache.empty()) return;
+    auto oldest = mBufferCache.begin();
+    for (auto entry = mBufferCache.begin(); entry != mBufferCache.end(); ++entry) {
+        if (entry->second.second < oldest->second.second) oldest = entry;
+    }
+    mBufferCache.erase(oldest);
+}
+
+void BufferQueueProducer::cacheBufferLocked(const sp<GraphicBuffer>& buffer) {
+    // Factory evicts before checking whether the inserted ID already exists.
+    if (mBufferCache.size() >= 5) evictBuffer();
+    mBufferCache[buffer->getId()] = {
+            buffer, sBufferCacheAccess.fetch_add(1, std::memory_order_relaxed)};
+}
+
+status_t BufferQueueProducer::attachCachedBuffer(int* outSlot, const sp<GraphicBuffer>& buffer,
+                                                uint64_t id) {
+    ATRACE_CALL();
+    if (!outSlot || (!buffer && id == 0)) return BAD_VALUE;
+    std::unique_lock<std::mutex> lock(mCore->mMutex);
+    if (mCore->mIsAbandoned || mCore->mConnectedApi == BufferQueueCore::NO_CONNECTED_API) {
+        return NO_INIT;
+    }
+    if (mCore->mSharedBufferMode) return BAD_VALUE;
+    if (id != 0 && !buffer && queryBufferLocked(id) == NAME_NOT_FOUND) return NAME_NOT_FOUND;
+    mCore->waitWhileAllocatingLocked(lock);
+    int found;
+    status_t status = waitForFreeSlotThenRelock(FreeSlotCaller::Attach, lock, &found);
+    if (status != NO_ERROR) return status;
+    if (found == BufferQueueCore::INVALID_BUFFER_SLOT) return -EBUSY;
+    *outSlot = found;
+    if (id != 0) {
+        if (buffer) {
+            cacheBufferLocked(buffer);
+            mSlots[found].mGraphicBuffer = buffer;
+        } else {
+            fetchBufferLocked(id, &mSlots[found].mGraphicBuffer);
+        }
+    }
+    // PICO's zero-ID path preserves the selected slot's existing buffer.
+    // Unlike ordinary attachBuffer, this entry point has no generation check.
+    mSlots[found].mBufferState.attachProducer();
+    mSlots[found].mEglFence = EGL_NO_SYNC_KHR;
+    mSlots[found].mFence = Fence::NO_FENCE;
+    mSlots[found].mRequestBufferCalled = true;
+    mSlots[found].mAcquireCalled = false;
+    mSlots[found].mNeedsReallocation = false;
+    mCore->mActiveBuffers.insert(found);
+    VALIDATE_CONSISTENCY();
+    return NO_ERROR;
+}
+
 status_t BufferQueueProducer::queueBuffer(int slot,
         const QueueBufferInput &input, QueueBufferOutput *output) {
     ATRACE_CALL();
@@ -1377,7 +1451,8 @@ status_t BufferQueueProducer::disconnect(int api, DisconnectMode mode) {
                     mCore->mConnectedPid = -1;
                     mCore->mSidebandStream.clear();
                     mCore->mDequeueCondition.notify_all();
-                mCore->mPicoFenceCondition.notify_all();
+                    mCore->mPicoFenceCondition.notify_all();
+                    mBufferCache.clear();
                     listener = mCore->mConsumerListener;
                 } else if (mCore->mConnectedApi == BufferQueueCore::NO_CONNECTED_API) {
                     BQ_LOGE("disconnect: not connected (req=%d)", api);

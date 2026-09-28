@@ -17,6 +17,7 @@
 #ifndef ANDROID_GUI_BUFFERQUEUEPRODUCER_H
 #define ANDROID_GUI_BUFFERQUEUEPRODUCER_H
 
+#include <map>
 #include <gui/BufferQueueDefs.h>
 #include <gui/IGraphicBufferProducer.h>
 
@@ -95,6 +96,8 @@ public:
 
     // See IGraphicBufferProducer::attachBuffer
     virtual status_t attachBuffer(int* outSlot, const sp<GraphicBuffer>& buffer);
+    status_t attachCachedBuffer(int* outSlot, const sp<GraphicBuffer>& buffer,
+                                uint64_t bufferId) override;
 
     // queueBuffer returns a filled buffer to the BufferQueue.
     //
@@ -198,6 +201,10 @@ private:
     // Returns the slot of the next free buffer if one is available or
     // BufferQueueCore::INVALID_BUFFER_SLOT otherwise
     int getFreeBufferLocked() const;
+    status_t queryBufferLocked(uint64_t bufferId);
+    void fetchBufferLocked(uint64_t bufferId, sp<GraphicBuffer>* buffer);
+    void cacheBufferLocked(const sp<GraphicBuffer>& buffer);
+    void evictBuffer();
     void waitForFenceReadyBufferLocked(int slot, sp<Fence>* outFence);
 
     // Returns the next free slot if one is available or
@@ -266,6 +273,8 @@ private:
     std::condition_variable mDequeueWaitingForAllocationCondition;
 
     bool mPicoFenceReadyMode = false;
+    // Protected by the queue mutex. PICO retains at most five recent buffers.
+    std::map<uint64_t, std::pair<sp<GraphicBuffer>, uint64_t>> mBufferCache;
 }; // class BufferQueueProducer
 
 } // namespace android
