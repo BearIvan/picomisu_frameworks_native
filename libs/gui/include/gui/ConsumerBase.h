@@ -190,6 +190,9 @@ protected:
     virtual status_t acquireBufferLocked(BufferItem *item, nsecs_t presentWhen,
             uint64_t maxFrameNumber = 0);
 
+    // Caller holds mMutex; retains the most recently acquired slot.
+    int getLatchAcquireSlotLocked();
+
     // releaseBufferLocked relinquishes control over a buffer, returning that
     // control to the BufferQueue.
     //
@@ -245,6 +248,7 @@ protected:
     // interface. It is initialized to false, and set to true in the abandon
     // method.  A BufferQueue that has been abandoned will return the NO_INIT
     // error from all IConsumerBase methods capable of returning an error.
+    int mLatchAcquireSlot;
     bool mAbandoned;
 
     // mName is a string used to identify the ConsumerBase in log messages.

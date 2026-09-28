@@ -73,6 +73,7 @@ BufferQueueCore::BufferQueueCore() :
     mUnusedSlots(),
     mActiveBuffers(),
     mDequeueCondition(),
+    mPicoFenceCondition(),
     mDequeueBufferCannotBlock(false),
     mQueueBufferCanDrop(false),
     mLegacyBufferDrop(true),
@@ -214,6 +215,8 @@ void BufferQueueCore::clearBufferSlotLocked(int slot) {
     BQ_LOGV("clearBufferSlotLocked: slot %d", slot);
 
     mSlots[slot].mGraphicBuffer.clear();
+    mSlots[slot].mPicoFenceReady = false;
+    mSlots[slot].mPicoReadyFence = Fence::NO_FENCE;
     mSlots[slot].mBufferState.reset();
     mSlots[slot].mRequestBufferCalled = false;
     mSlots[slot].mFrameNumber = 0;

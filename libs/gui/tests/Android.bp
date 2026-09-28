@@ -118,7 +118,7 @@ cc_test {
     test_suites: ["device-tests"],
     compile_multilib: "both",
     cflags: ["-Wall", "-Werror"],
-    srcs: ["PicoBufferQueueStatus_test.cpp", "PicoProducerFence_test.cpp"],
+    srcs: ["PicoBufferQueueStatus_test.cpp", "PicoProducerFence_test.cpp", "PicoConsumerFence_test.cpp"],
     shared_libs: [
         "libbinder", "libgui", "libutils", "liblog", "libui",
         "libnativewindow", "libcutils",
@@ -141,4 +141,13 @@ cc_test {
     cflags: ["-Wall", "-Werror"],
     srcs: ["PicoProducerFence_probe.cpp"],
     shared_libs: ["libbinder", "libgui", "libui", "libutils", "liblog"],
+}
+
+cc_test {
+    name: "picomisu_consumer_fence_probe",
+    gtest: false,
+    compile_multilib: "both",
+    cflags: ["-Wall", "-Werror"],
+    srcs: ["PicoConsumerFence_probe.cpp"],
+    shared_libs: ["libbinder", "libgui", "libui", "libutils", "liblog", "libnativewindow"],
 }

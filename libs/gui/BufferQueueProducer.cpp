@@ -233,8 +233,17 @@ int BufferQueueProducer::getFreeBufferLocked() const {
     if (mCore->mFreeBuffers.empty()) {
         return BufferQueueCore::INVALID_BUFFER_SLOT;
     }
-    int slot = mCore->mFreeBuffers.front();
-    mCore->mFreeBuffers.pop_front();
+    auto selected = mCore->mFreeBuffers.begin();
+    const sp<GraphicBuffer>& buffer = mSlots[*selected].mGraphicBuffer;
+    if (mPicoFenceReadyMode && buffer != nullptr &&
+            (buffer->getUsage() & 0xf00000000ULL) == 0x200000000ULL &&
+            !mSlots[*selected].mPicoFenceReady) {
+        auto ready = std::find_if(std::next(selected), mCore->mFreeBuffers.end(),
+                [this](int slot) { return mSlots[slot].mPicoFenceReady; });
+        if (ready != mCore->mFreeBuffers.end()) selected = ready;
+    }
+    int slot = *selected;
+    mCore->mFreeBuffers.erase(selected);
     return slot;
 }
 
@@ -508,6 +517,7 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
             mCore->mSharedBufferSlot = found;
             mSlots[found].mBufferState.mShared = true;
         }
+        waitForFenceReadyBufferLocked(found, outFence);
     } // Autolock scope
 
     if (returnFlags & BUFFER_NEEDS_REALLOCATION) {
@@ -577,6 +587,35 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
     addAndGetFrameTimestamps(nullptr, outTimestamps);
 
     return returnFlags;
+}
+
+// Caller owns mCore->mMutex. The factory waits once for 13,880,000 ns.
+void BufferQueueProducer::waitForFenceReadyBufferLocked(int slot, sp<Fence>* outFence) {
+    if (slot < 0 || slot >= BufferQueueDefs::NUM_BUFFER_SLOTS || outFence == nullptr) return;
+    sp<GraphicBuffer> buffer = mSlots[slot].mGraphicBuffer;
+    constexpr uint64_t mask = 0xf00000000ULL;
+    if (buffer == nullptr || (buffer->getUsage() & mask) != 0x200000000ULL) return;
+    mPicoFenceReadyMode = true;
+    uint64_t outcome = 0;
+    bool timeout = false;
+    if (!mSlots[slot].mPicoFenceReady) {
+        std::unique_lock<std::mutex> adopted(mCore->mMutex, std::adopt_lock);
+        timeout = mCore->mPicoFenceCondition.wait_for(adopted,
+                std::chrono::nanoseconds(13'880'000)) == std::cv_status::timeout;
+        // Preserve ownership in the caller's existing lock.
+        adopted.release();
+        buffer = mSlots[slot].mGraphicBuffer;
+        if (buffer == nullptr) return;
+    }
+    if (timeout) {
+        outcome = 0x800000000ULL;
+    } else {
+        if (!mSlots[slot].mPicoFenceReady) outcome = 0x400000000ULL;
+        *outFence = mSlots[slot].mPicoReadyFence;
+        mSlots[slot].mPicoFenceReady = false;
+        mSlots[slot].mPicoReadyFence = Fence::NO_FENCE;
+    }
+    buffer->usage = (buffer->getUsage() & ~mask) | outcome;
 }
 
 status_t BufferQueueProducer::detachBuffer(int slot) {
@@ -1318,6 +1357,7 @@ status_t BufferQueueProducer::disconnect(int api, DisconnectMode mode) {
                     mCore->mConnectedPid = -1;
                     mCore->mSidebandStream.clear();
                     mCore->mDequeueCondition.notify_all();
+                mCore->mPicoFenceCondition.notify_all();
                     listener = mCore->mConsumerListener;
                 } else if (mCore->mConnectedApi == BufferQueueCore::NO_CONNECTED_API) {
                     BQ_LOGE("disconnect: not connected (req=%d)", api);

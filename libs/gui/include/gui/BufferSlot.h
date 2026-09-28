@@ -182,7 +182,9 @@ struct BufferSlot {
       mEglFence(EGL_NO_SYNC_KHR),
       mFence(Fence::NO_FENCE),
       mAcquireCalled(false),
-      mNeedsReallocation(false) {
+      mNeedsReallocation(false),
+      mPicoFenceReady(false),
+      mPicoReadyFence(Fence::NO_FENCE) {
     }
 
     // mGraphicBuffer points to the buffer allocated for this slot or is NULL
@@ -230,6 +232,10 @@ struct BufferSlot {
     // producer. If so, it needs to set the BUFFER_NEEDS_REALLOCATION flag when
     // dequeued to prevent the producer from using a stale cached buffer.
     bool mNeedsReallocation;
+
+    // Local PICO consumer/dequeue handshake, guarded by BufferQueueCore::mMutex.
+    bool mPicoFenceReady;
+    sp<Fence> mPicoReadyFence;
 };
 
 } // namespace android

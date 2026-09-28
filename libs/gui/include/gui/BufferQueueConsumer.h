@@ -155,6 +155,8 @@ public:
     // dump our state in a String
     status_t dumpState(const String8& prefix, String8* outResult) const override;
 
+    status_t notifyFenceReady(const sp<Fence>& fence, uint64_t bufferId, int slot) override;
+
     // Functions required for backwards compatibility.
     // These will be modified/renamed in IGraphicBufferConsumer and will be
     // removed from this class at that time. See b/13306289.
@@ -178,6 +180,8 @@ public:
     constexpr static int MAX_REASONABLE_NSEC = 1'000'000'000ULL; // 1 second
 
 private:
+    // Caller holds mCore->mMutex. Kept after existing virtual methods.
+    virtual status_t detachBufferLocked(int slot);
     sp<BufferQueueCore> mCore;
 
     // This references mCore->mSlots. Lock mCore->mMutex while accessing.

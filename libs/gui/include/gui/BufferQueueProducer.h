@@ -191,12 +191,14 @@ public:
     virtual status_t getConsumerUsage(uint64_t* outUsage) const override;
 
 private:
+    friend class PicoConsumerFenceTest;
     // This is required by the IBinder::DeathRecipient interface
     virtual void binderDied(const wp<IBinder>& who);
 
     // Returns the slot of the next free buffer if one is available or
     // BufferQueueCore::INVALID_BUFFER_SLOT otherwise
     int getFreeBufferLocked() const;
+    void waitForFenceReadyBufferLocked(int slot, sp<Fence>* outFence);
 
     // Returns the next free slot if one is available or
     // BufferQueueCore::INVALID_BUFFER_SLOT otherwise
@@ -263,6 +265,7 @@ private:
     // allocation to complete.
     std::condition_variable mDequeueWaitingForAllocationCondition;
 
+    bool mPicoFenceReadyMode = false;
 }; // class BufferQueueProducer
 
 } // namespace android

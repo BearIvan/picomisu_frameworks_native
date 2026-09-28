@@ -274,6 +274,11 @@ public:
     // dump state into a string
     virtual status_t dumpState(const String8& prefix, String8* outResult) const = 0;
 
+    // PICO local-only callback. Factory Binder/HIDL proxies use this default
+    // no-op; no extra wire transaction is defined for this method.
+    virtual status_t notifyFenceReady(const sp<Fence>& /*fence*/, uint64_t /*bufferId*/,
+                                     int /*slot*/) { return NO_ERROR; }
+
     // Provide backwards source compatibility
     void dumpState(String8& result, const char* prefix) {
         String8 returned;

@@ -85,6 +85,7 @@ public:
     virtual ~BufferQueueCore();
 
 private:
+    friend class PicoConsumerFenceTest;
     // Dump our state in a string
     void dumpState(const String8& prefix, String8* outResult) const;
 
@@ -225,6 +226,7 @@ private:
     // mDequeueCondition is a condition variable used for dequeueBuffer in
     // synchronous mode.
     mutable std::condition_variable mDequeueCondition;
+    mutable std::condition_variable mPicoFenceCondition;
 
     // mDequeueBufferCannotBlock indicates whether dequeueBuffer is allowed to
     // block. This flag is set during connect when both the producer and

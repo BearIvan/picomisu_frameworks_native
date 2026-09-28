@@ -310,7 +310,10 @@ status_t BufferQueueConsumer::detachBuffer(int slot) {
     ATRACE_BUFFER_INDEX(slot);
     BQ_LOGV("detachBuffer: slot %d", slot);
     std::lock_guard<std::mutex> lock(mCore->mMutex);
+    return detachBufferLocked(slot);
+}
 
+status_t BufferQueueConsumer::detachBufferLocked(int slot) {
     if (mCore->mIsAbandoned) {
         BQ_LOGE("detachBuffer: BufferQueue has been abandoned");
         return NO_INIT;
@@ -444,6 +447,9 @@ status_t BufferQueueConsumer::releaseBuffer(int slot, uint64_t frameNumber,
     }
 
     sp<IProducerListener> listener;
+    bool picoDetach = false;
+    uint64_t bufferId = 0;
+    status_t detachResult = NO_ERROR;
     { // Autolock scope
         std::lock_guard<std::mutex> lock(mCore->mMutex);
 
@@ -464,37 +470,64 @@ status_t BufferQueueConsumer::releaseBuffer(int slot, uint64_t frameNumber,
             return BAD_VALUE;
         }
 
-        mSlots[slot].mEglDisplay = eglDisplay;
-        mSlots[slot].mEglFence = eglFence;
-        mSlots[slot].mFence = releaseFence;
-        mSlots[slot].mBufferState.release();
-
-        // After leaving shared buffer mode, the shared buffer will
-        // still be around. Mark it as no longer shared if this
-        // operation causes it to be free.
-        if (!mCore->mSharedBufferMode && mSlots[slot].mBufferState.isFree()) {
-            mSlots[slot].mBufferState.mShared = false;
-        }
-        // Don't put the shared buffer on the free list.
-        if (!mSlots[slot].mBufferState.isShared()) {
-            mCore->mActiveBuffers.erase(slot);
-            mCore->mFreeBuffers.push_back(slot);
-        }
-
-        if (mCore->mBufferReleasedCbEnabled) {
+        const sp<GraphicBuffer>& buffer = mSlots[slot].mGraphicBuffer;
+        if (buffer != nullptr && (buffer->getUsage() & 0xf00000000ULL) == 0x100000000ULL) {
+            bufferId = buffer->getId();
             listener = mCore->mConnectedProducerListener;
-        }
-        BQ_LOGV("releaseBuffer: releasing slot %d", slot);
+            detachResult = detachBufferLocked(slot);
+            picoDetach = true;
+        } else {
+            mSlots[slot].mEglDisplay = eglDisplay;
+            mSlots[slot].mEglFence = eglFence;
+            mSlots[slot].mFence = releaseFence;
+            mSlots[slot].mBufferState.release();
 
-        mCore->mDequeueCondition.notify_all();
-        VALIDATE_CONSISTENCY();
+            // After leaving shared buffer mode, the shared buffer will
+            // still be around. Mark it as no longer shared if this
+            // operation causes it to be free.
+            if (!mCore->mSharedBufferMode && mSlots[slot].mBufferState.isFree()) {
+                mSlots[slot].mBufferState.mShared = false;
+            }
+            // Don't put the shared buffer on the free list.
+            if (!mSlots[slot].mBufferState.isShared()) {
+                mCore->mActiveBuffers.erase(slot);
+                mCore->mFreeBuffers.push_back(slot);
+            }
+
+            if (mCore->mBufferReleasedCbEnabled) {
+                listener = mCore->mConnectedProducerListener;
+            }
+            BQ_LOGV("releaseBuffer: releasing slot %d", slot);
+
+            mCore->mDequeueCondition.notify_all();
+            VALIDATE_CONSISTENCY();
+        }
     } // Autolock scope
 
     // Call back without lock held
     if (listener != nullptr) {
-        listener->onBufferReleased();
+        if (picoDetach) {
+            listener->onBufferReleasedWithFence(releaseFence, bufferId, false);
+        } else {
+            listener->onBufferReleased();
+        }
     }
 
+    return picoDetach ? detachResult : NO_ERROR;
+}
+
+status_t BufferQueueConsumer::notifyFenceReady(const sp<Fence>& fence,
+                                                uint64_t bufferId, int slot) {
+    if (slot < 0 || slot >= BufferQueueDefs::NUM_BUFFER_SLOTS || fence == nullptr) {
+        return BAD_VALUE;
+    }
+    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    const sp<GraphicBuffer>& buffer = mSlots[slot].mGraphicBuffer;
+    if (buffer != nullptr && buffer->getId() == bufferId) {
+        mSlots[slot].mPicoReadyFence = fence;
+        mSlots[slot].mPicoFenceReady = true;
+        mCore->mPicoFenceCondition.notify_all();
+    }
     return NO_ERROR;
 }
 
@@ -541,6 +574,7 @@ status_t BufferQueueConsumer::disconnect() {
     mCore->freeAllBuffersLocked();
     mCore->mSharedBufferSlot = BufferQueueCore::INVALID_BUFFER_SLOT;
     mCore->mDequeueCondition.notify_all();
+    mCore->mPicoFenceCondition.notify_all();
     return NO_ERROR;
 }
 

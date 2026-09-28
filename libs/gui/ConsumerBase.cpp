@@ -56,6 +56,7 @@ static int32_t createProcessUniqueId() {
 }
 
 ConsumerBase::ConsumerBase(const sp<IGraphicBufferConsumer>& bufferQueue, bool controlledByApp) :
+        mLatchAcquireSlot(BufferItem::INVALID_BUFFER_SLOT),
         mAbandoned(false),
         mConsumer(bufferQueue),
         mPrevFinalReleaseFence(Fence::NO_FENCE) {
@@ -365,8 +366,13 @@ status_t ConsumerBase::acquireBufferLocked(BufferItem *item,
     CB_LOGV("acquireBufferLocked: -> slot=%d/%" PRIu64,
             item->mSlot, item->mFrameNumber);
 
+    mLatchAcquireSlot = item->mSlot;
     return OK;
 }
+int ConsumerBase::getLatchAcquireSlotLocked() {
+    return mLatchAcquireSlot;
+}
+
 
 status_t ConsumerBase::addReleaseFence(int slot,
         const sp<GraphicBuffer> graphicBuffer, const sp<Fence>& fence) {
