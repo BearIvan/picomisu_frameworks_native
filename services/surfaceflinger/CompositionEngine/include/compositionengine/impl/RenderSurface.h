@@ -64,6 +64,7 @@ public:
     // Debugging
     void dump(std::string& result) const override;
     std::uint32_t getPageFlipCount() const override;
+    status_t attachBuffer(sp<GraphicBuffer>& buffer) override;
 
     // Testing
     void setPageFlipCountForTest(std::uint32_t);
@@ -81,6 +82,8 @@ private:
     const sp<ANativeWindow> mNativeWindow;
     // Kept separately: ANativeWindow can also be a mock or another implementation.
     const sp<Surface> mSurface;
+    // PICO remembers the last attach attempt, including failed attempts.
+    sp<GraphicBuffer> mLastAttachedBuffer;
     // Current buffer being rendered into
     sp<GraphicBuffer> mGraphicBuffer;
     const sp<DisplaySurface> mDisplaySurface;

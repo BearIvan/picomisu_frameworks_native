@@ -99,6 +99,7 @@ public:
 
     // Called to flip the client target when needed
     virtual void flipClientTarget(bool flip)  = 0;
+    virtual status_t attachBuffer(sp<GraphicBuffer>& buffer);
 };
 
 } // namespace compositionengine

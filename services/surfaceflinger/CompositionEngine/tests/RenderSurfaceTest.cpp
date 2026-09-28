@@ -52,6 +52,21 @@ using testing::ReturnRef;
 using testing::SetArgPointee;
 using testing::StrictMock;
 
+class AttachRecordingSurface : public Surface {
+public:
+    explicit AttachRecordingSurface(const sp<IGraphicBufferProducer>& producer) : Surface(producer) {}
+    int attachBuffer(ANativeWindowBuffer* buffer) override {
+        EXPECT_EQ(expected->getNativeBuffer(), buffer);
+        observedUsage = expected->getUsage();
+        ++calls;
+        return result;
+    }
+    sp<GraphicBuffer> expected;
+    uint64_t observedUsage = 0;
+    int calls = 0;
+    status_t result = NO_ERROR;
+};
+
 class RenderSurfaceTest : public testing::Test {
 public:
     RenderSurfaceTest() {
@@ -292,6 +307,58 @@ TEST_F(RenderSurfaceTest, dequeueBufferObtainsABuffer) {
 /* ------------------------------------------------------------------------
  * RenderSurface::queueBuffer()
  */
+
+
+TEST_F(RenderSurfaceTest, picoAttachMarksUsageAndRetainsCurrentBuffer) {
+    sp<BufferQueueCore> core = new BufferQueueCore;
+    sp<AttachRecordingSurface> surface = new AttachRecordingSurface(new BufferQueueProducer(core));
+    impl::RenderSurface target(mCompositionEngine, mDisplay,
+            RenderSurfaceCreationArgs{64, 64, mNativeWindow, mDisplaySurface, surface});
+    sp<GraphicBuffer> buffer = new GraphicBuffer;
+    buffer->usage = 0x10800000040ULL;
+    surface->expected = buffer;
+    EXPECT_EQ(NO_ERROR, target.attachBuffer(buffer));
+    EXPECT_EQ(0x10100000040ULL, surface->observedUsage);
+    EXPECT_EQ(0x10200000040ULL, buffer->getUsage());
+    EXPECT_EQ(buffer.get(), target.mutableGraphicBufferForTest().get());
+}
+
+TEST_F(RenderSurfaceTest, picoAttachRejectsRepeatedBufferId) {
+    sp<BufferQueueCore> core = new BufferQueueCore;
+    sp<AttachRecordingSurface> surface = new AttachRecordingSurface(new BufferQueueProducer(core));
+    impl::RenderSurface target(mCompositionEngine, mDisplay,
+            RenderSurfaceCreationArgs{64, 64, mNativeWindow, mDisplaySurface, surface});
+    sp<GraphicBuffer> buffer = new GraphicBuffer;
+    surface->expected = buffer;
+    ASSERT_EQ(NO_ERROR, target.attachBuffer(buffer));
+    EXPECT_EQ(ALREADY_EXISTS, target.attachBuffer(buffer));
+    EXPECT_EQ(1, surface->calls);
+    EXPECT_EQ(0x200000000ULL, buffer->getUsage() & 0xf00000000ULL);
+}
+
+TEST_F(RenderSurfaceTest, picoAttachFailureClearsCurrentBufferAndRemembersAttempt) {
+    sp<BufferQueueCore> core = new BufferQueueCore;
+    sp<AttachRecordingSurface> surface = new AttachRecordingSurface(new BufferQueueProducer(core));
+    impl::RenderSurface target(mCompositionEngine, mDisplay,
+            RenderSurfaceCreationArgs{64, 64, mNativeWindow, mDisplaySurface, surface});
+    target.mutableGraphicBufferForTest() = new GraphicBuffer;
+    sp<GraphicBuffer> buffer = new GraphicBuffer;
+    buffer->usage = 0x10800000040ULL;
+    surface->expected = buffer;
+    surface->result = INVALID_OPERATION;
+    EXPECT_EQ(INVALID_OPERATION, target.attachBuffer(buffer));
+    EXPECT_EQ(nullptr, target.mutableGraphicBufferForTest().get());
+    EXPECT_EQ(0x10000000040ULL, buffer->getUsage());
+    EXPECT_EQ(ALREADY_EXISTS, target.attachBuffer(buffer));
+    EXPECT_EQ(1, surface->calls);
+}
+
+TEST_F(RenderSurfaceTest, picoAttachRejectsNullBufferAndMissingTypedSurface) {
+    sp<GraphicBuffer> buffer;
+    EXPECT_EQ(BAD_VALUE, mSurface.attachBuffer(buffer));
+    buffer = new GraphicBuffer;
+    EXPECT_EQ(NO_INIT, mSurface.attachBuffer(buffer));
+}
 
 TEST_F(RenderSurfaceTest, queueBufferHandlesNoClientComposition) {
     sp<GraphicBuffer> buffer = new GraphicBuffer();

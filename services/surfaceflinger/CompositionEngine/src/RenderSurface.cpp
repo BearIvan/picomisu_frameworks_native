@@ -38,6 +38,8 @@ namespace android::compositionengine {
 
 RenderSurface::~RenderSurface() = default;
 
+status_t RenderSurface::attachBuffer(sp<GraphicBuffer>&) { return NO_ERROR; }
+
 namespace impl {
 
 std::unique_ptr<compositionengine::RenderSurface> createRenderSurface(
@@ -223,6 +225,28 @@ void RenderSurface::setViewportAndProjection() {
     Rect sourceCrop = Rect(mSize);
     renderEngine.setViewportAndProjection(mSize.width, mSize.height, sourceCrop,
                                           ui::Transform::ROT_0);
+}
+
+status_t RenderSurface::attachBuffer(sp<GraphicBuffer>& buffer) {
+    // The factory assumes valid inputs. Keep mock/unsupported windows safe.
+    if (buffer == nullptr) return BAD_VALUE;
+    if (mSurface == nullptr) return NO_INIT;
+    if (mLastAttachedBuffer != nullptr && mLastAttachedBuffer->getId() == buffer->getId()) {
+        return ALREADY_EXISTS;
+    }
+    constexpr uint64_t mask = 0xf00000000ULL;
+    buffer->usage = (buffer->getUsage() & ~mask) | 0x100000000ULL;
+    status_t result = mSurface->attachBuffer(buffer->getNativeBuffer());
+    buffer->usage = (buffer->getUsage() & ~mask) | 0x200000000ULL;
+    if (result != NO_ERROR) {
+        buffer->usage &= ~mask;
+        mGraphicBuffer.clear();
+        ALOGE("Error attaching direct buffer for display [%s]: %d", mDisplay.getName().c_str(), result);
+    } else {
+        mGraphicBuffer = buffer;
+    }
+    mLastAttachedBuffer = buffer;
+    return result;
 }
 
 void RenderSurface::flip() {
