@@ -65,6 +65,9 @@ public:
     void dump(std::string& result) const override;
     std::uint32_t getPageFlipCount() const override;
     status_t attachBuffer(sp<GraphicBuffer>& buffer) override;
+    status_t setSingleLayer(const sp<::android::Layer>& layer, const sp<GraphicBuffer>& buffer) override;
+    void setMultiLayerFlag(bool enabled) override;
+    bool getMultiLayerFlag() override;
 
     // Testing
     void setPageFlipCountForTest(std::uint32_t);

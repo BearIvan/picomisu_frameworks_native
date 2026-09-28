@@ -27,6 +27,9 @@ class RenderSurface : public compositionengine::RenderSurface {
 public:
     RenderSurface();
     ~RenderSurface() override;
+    MOCK_METHOD2(setSingleLayer, status_t(const sp<::android::Layer>&, const sp<GraphicBuffer>&));
+    MOCK_METHOD1(setMultiLayerFlag, void(bool));
+    MOCK_METHOD0(getMultiLayerFlag, bool());
 
     MOCK_CONST_METHOD0(isValid, bool());
     MOCK_METHOD0(initialize, void());

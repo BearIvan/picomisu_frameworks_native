@@ -20,4 +20,8 @@ namespace android::compositionengine {
 
 DisplaySurface::~DisplaySurface() = default;
 
+status_t DisplaySurface::setSingleLayer(const sp<::android::Layer>&, const sp<GraphicBuffer>&) { return NO_ERROR; }
+void DisplaySurface::setMultiLayerFlag(bool) {}
+bool DisplaySurface::getMultiLayerFlag() { return true; }
+
 } // namespace android::compositionengine

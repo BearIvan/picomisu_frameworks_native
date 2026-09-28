@@ -27,6 +27,7 @@
 
 namespace android {
 
+class Layer;
 class GraphicBuffer;
 
 namespace compositionengine {
@@ -100,6 +101,9 @@ public:
     // Called to flip the client target when needed
     virtual void flipClientTarget(bool flip)  = 0;
     virtual status_t attachBuffer(sp<GraphicBuffer>& buffer);
+    virtual status_t setSingleLayer(const sp<::android::Layer>& layer, const sp<GraphicBuffer>& buffer);
+    virtual void setMultiLayerFlag(bool enabled);
+    virtual bool getMultiLayerFlag();
 };
 
 } // namespace compositionengine

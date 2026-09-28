@@ -22,6 +22,9 @@
 
 namespace android {
 
+class Layer;
+class GraphicBuffer;
+
 class Fence;
 class IGraphicBufferProducer;
 class String8;
@@ -74,6 +77,9 @@ public:
     virtual void resizeBuffers(const uint32_t w, const uint32_t h) = 0;
 
     virtual const sp<Fence>& getClientTargetAcquireFence() const = 0;
+    virtual status_t setSingleLayer(const sp<::android::Layer>& layer, const sp<GraphicBuffer>& buffer);
+    virtual void setMultiLayerFlag(bool enabled);
+    virtual bool getMultiLayerFlag();
 };
 
 } // namespace compositionengine

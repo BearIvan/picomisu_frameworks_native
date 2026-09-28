@@ -30,6 +30,7 @@
 #include <renderengine/mock/RenderEngine.h>
 
 #include "MockHWComposer.h"
+#include "Layer.h"
 
 namespace android::compositionengine {
 namespace {
@@ -308,6 +309,41 @@ TEST_F(RenderSurfaceTest, dequeueBufferObtainsABuffer) {
  * RenderSurface::queueBuffer()
  */
 
+
+TEST_F(RenderSurfaceTest, picoDefaultInterfacesKeepMultiLayerEnabled) {
+    auto& base = static_cast<compositionengine::RenderSurface&>(mSurface);
+    auto& displayBase = static_cast<compositionengine::DisplaySurface&>(*mDisplaySurface);
+    base.RenderSurface::setMultiLayerFlag(false);
+    displayBase.DisplaySurface::setMultiLayerFlag(false);
+    EXPECT_TRUE(base.RenderSurface::getMultiLayerFlag());
+    EXPECT_TRUE(displayBase.DisplaySurface::getMultiLayerFlag());
+}
+
+TEST_F(RenderSurfaceTest, picoSingleLayerForwardsArgumentsAndFailure) {
+    sp<::android::Layer> layer;
+    sp<GraphicBuffer> buffer = new GraphicBuffer;
+    EXPECT_CALL(*mDisplaySurface, setSingleLayer(Ref(layer), Ref(buffer)))
+            .WillOnce(Return(INVALID_OPERATION));
+    EXPECT_EQ(INVALID_OPERATION, mSurface.setSingleLayer(layer, buffer));
+}
+
+TEST_F(RenderSurfaceTest, picoSingleLayerForwardsSuccessAndClear) {
+    sp<::android::Layer> layer;
+    sp<GraphicBuffer> buffer;
+    EXPECT_CALL(*mDisplaySurface, setSingleLayer(Ref(layer), Ref(buffer)))
+            .WillOnce(Return(NO_ERROR));
+    EXPECT_EQ(NO_ERROR, mSurface.setSingleLayer(layer, buffer));
+}
+
+TEST_F(RenderSurfaceTest, picoMultiLayerForwardsBothStates) {
+    EXPECT_CALL(*mDisplaySurface, setMultiLayerFlag(true)).Times(1);
+    EXPECT_CALL(*mDisplaySurface, setMultiLayerFlag(false)).Times(1);
+    EXPECT_CALL(*mDisplaySurface, getMultiLayerFlag()).WillOnce(Return(true)).WillOnce(Return(false));
+    mSurface.setMultiLayerFlag(true);
+    EXPECT_TRUE(mSurface.getMultiLayerFlag());
+    mSurface.setMultiLayerFlag(false);
+    EXPECT_FALSE(mSurface.getMultiLayerFlag());
+}
 
 TEST_F(RenderSurfaceTest, picoAttachMarksUsageAndRetainsCurrentBuffer) {
     sp<BufferQueueCore> core = new BufferQueueCore;

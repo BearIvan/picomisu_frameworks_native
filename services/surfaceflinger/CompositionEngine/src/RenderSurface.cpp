@@ -38,6 +38,10 @@ namespace android::compositionengine {
 
 RenderSurface::~RenderSurface() = default;
 
+status_t RenderSurface::setSingleLayer(const sp<::android::Layer>&, const sp<GraphicBuffer>&) { return NO_ERROR; }
+void RenderSurface::setMultiLayerFlag(bool) {}
+bool RenderSurface::getMultiLayerFlag() { return true; }
+
 status_t RenderSurface::attachBuffer(sp<GraphicBuffer>&) { return NO_ERROR; }
 
 namespace impl {
@@ -247,6 +251,18 @@ status_t RenderSurface::attachBuffer(sp<GraphicBuffer>& buffer) {
     }
     mLastAttachedBuffer = buffer;
     return result;
+}
+
+status_t RenderSurface::setSingleLayer(const sp<::android::Layer>& layer, const sp<GraphicBuffer>& buffer) {
+    return mDisplaySurface->setSingleLayer(layer, buffer);
+}
+
+void RenderSurface::setMultiLayerFlag(bool enabled) {
+    mDisplaySurface->setMultiLayerFlag(enabled);
+}
+
+bool RenderSurface::getMultiLayerFlag() {
+    return mDisplaySurface->getMultiLayerFlag();
 }
 
 void RenderSurface::flip() {

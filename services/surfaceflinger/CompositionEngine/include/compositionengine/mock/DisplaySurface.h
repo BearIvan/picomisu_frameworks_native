@@ -26,6 +26,9 @@ class DisplaySurface : public compositionengine::DisplaySurface {
 public:
     DisplaySurface();
     ~DisplaySurface() override;
+    MOCK_METHOD2(setSingleLayer, status_t(const sp<::android::Layer>&, const sp<GraphicBuffer>&));
+    MOCK_METHOD1(setMultiLayerFlag, void(bool));
+    MOCK_METHOD0(getMultiLayerFlag, bool());
 
     MOCK_METHOD1(beginFrame, status_t(bool mustRecompose));
     MOCK_METHOD1(prepareFrame, status_t(CompositionType compositionType));
