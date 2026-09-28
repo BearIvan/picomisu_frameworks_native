@@ -4,7 +4,11 @@
 #include <binder/Binder.h>
 #include <binder/Parcel.h>
 #include <gui/BufferQueueCore.h>
+#include <gui/BufferQueueConsumer.h>
 #include <gui/BufferQueueProducer.h>
+#include <gui/BufferItem.h>
+#include <gui/IConsumerListener.h>
+#include <gui/IProducerListener.h>
 #include <gtest/gtest.h>
 #include <system/window.h>
 
@@ -40,6 +44,19 @@ private:
     sp<IBinder> mTarget;
 };
 
+class FrameListener : public BnConsumerListener {
+public:
+    void onFrameAvailable(const BufferItem& item) override {
+        ++calls;
+        callbackBuffer = item.mGraphicBuffer.get();
+    }
+    void onFrameReplaced(const BufferItem& item) override { onFrameAvailable(item); }
+    void onBuffersReleased() override {}
+    void onSidebandStreamChanged() override {}
+    int calls = 0;
+    GraphicBuffer* callbackBuffer = nullptr;
+};
+
 } // namespace
 
 class PicoBufferQueueStatusTest : public testing::Test {
@@ -47,6 +64,7 @@ protected:
     void SetUp() override {
         core = new BufferQueueCore;
         producer = new BufferQueueProducer(core);
+        consumer = new BufferQueueConsumer(core);
     }
     int status() {
         std::lock_guard<std::mutex> lock(core->mMutex);
@@ -64,8 +82,48 @@ protected:
         std::lock_guard<std::mutex> lock(other->mMutex);
         return other->mPicoVrStatus;
     }
+    bool isPicoConsumer() {
+        std::lock_guard<std::mutex> lock(core->mMutex);
+        return core->mHasPicoConsumer;
+    }
+    int consumerId() {
+        std::lock_guard<std::mutex> lock(core->mMutex);
+        return core->mPicoConsumerId;
+    }
+    bool consumerLogging() {
+        std::lock_guard<std::mutex> lock(core->mMutex);
+        return core->mPicoConsumerLogging;
+    }
+    status_t configureConsumer(int id, int logging) {
+        Parcel data, reply;
+        data.writeInterfaceToken(consumer->getInterfaceDescriptor());
+        data.writeInt32(id);
+        data.writeInt32(logging);
+        return IInterface::asBinder(consumer)->transact(10000, data, &reply);
+    }
+    void expectCallbackBuffer(bool markPico) {
+        sp<FrameListener> listener = new FrameListener;
+        ASSERT_EQ(NO_ERROR, consumer->connect(listener, false));
+        IGraphicBufferProducer::QueueBufferOutput output;
+        ASSERT_EQ(NO_ERROR, producer->connect(nullptr, NATIVE_WINDOW_API_CPU, false, &output));
+        if (markPico) ASSERT_EQ(NO_ERROR, configureConsumer(5, 0));
+        // An empty GraphicBuffer exercises the reference lifetime without a
+        // gralloc allocation, a rendered frame or display interaction.
+        sp<GraphicBuffer> buffer = new GraphicBuffer;
+        int slot = -1;
+        ASSERT_EQ(NO_ERROR, producer->attachBuffer(&slot, buffer));
+        IGraphicBufferProducer::QueueBufferInput input(0, false, HAL_DATASPACE_UNKNOWN,
+                Rect::EMPTY_RECT, NATIVE_WINDOW_SCALING_MODE_FREEZE, 0, Fence::NO_FENCE);
+        ASSERT_EQ(NO_ERROR, producer->queueBuffer(slot, input, &output));
+        ASSERT_EQ(1, listener->calls);
+        EXPECT_EQ(markPico ? buffer.get() : nullptr, listener->callbackBuffer);
+        BufferItem acquired;
+        ASSERT_EQ(NO_ERROR, consumer->acquireBuffer(&acquired, 0));
+        EXPECT_EQ(buffer.get(), acquired.mGraphicBuffer.get());
+    }
     sp<BufferQueueCore> core;
     sp<BufferQueueProducer> producer;
+    sp<BufferQueueConsumer> consumer;
 };
 
 TEST_F(PicoBufferQueueStatusTest, LocalQueryPreservesSignedValuesAndUpdatesState) {
@@ -135,6 +193,53 @@ TEST_F(PicoBufferQueueStatusTest, ServerAcceptsLegacyQueryWithoutInputPayload) {
     EXPECT_EQ(defaultWidth(), reply.readInt32());
     EXPECT_EQ(NO_ERROR, reply.readInt32());
     EXPECT_EQ(33, status());
+}
+
+TEST_F(PicoBufferQueueStatusTest, ConsumerMarkerIsSeparateFromProducerStatus) {
+    EXPECT_FALSE(isPicoConsumer());
+    ASSERT_EQ(NO_ERROR, configureConsumer(-13, 1));
+    EXPECT_TRUE(isPicoConsumer());
+    EXPECT_EQ(-13, consumerId());
+    EXPECT_TRUE(consumerLogging());
+    EXPECT_EQ(0, status());
+    ASSERT_EQ(NO_ERROR, configureConsumer(7, 2));
+    EXPECT_EQ(7, consumerId());
+    EXPECT_FALSE(consumerLogging());
+}
+
+TEST_F(PicoBufferQueueStatusTest, ConsumerRejectsWrongInterfaceToken) {
+    Parcel data, reply;
+    data.writeInterfaceToken(producer->getInterfaceDescriptor());
+    data.writeInt32(1);
+    data.writeInt32(0);
+    EXPECT_EQ(PERMISSION_DENIED, IInterface::asBinder(consumer)->transact(10000, data, &reply));
+    EXPECT_FALSE(isPicoConsumer());
+}
+
+TEST_F(PicoBufferQueueStatusTest, ConsumerRejectsIncompleteConfiguration) {
+    Parcel data, reply;
+    data.writeInterfaceToken(consumer->getInterfaceDescriptor());
+    data.writeInt32(99);
+    EXPECT_EQ(BAD_VALUE, IInterface::asBinder(consumer)->transact(10000, data, &reply));
+    EXPECT_FALSE(isPicoConsumer());
+    EXPECT_EQ(0, consumerId());
+}
+
+TEST_F(PicoBufferQueueStatusTest, StandardConsumerBinderCommandsStillWork) {
+    sp<QueryRelay> relay = new QueryRelay(IInterface::asBinder(consumer));
+    sp<IGraphicBufferConsumer> proxy = interface_cast<IGraphicBufferConsumer>(relay);
+    uint64_t mask = 0;
+    ASSERT_EQ(NO_ERROR, configureConsumer(1, 0));
+    EXPECT_EQ(NO_ERROR, proxy->getReleasedBuffers(&mask));
+    EXPECT_NE(0u, mask);
+}
+
+TEST_F(PicoBufferQueueStatusTest, OrdinaryCallbackClearsGraphicBufferReference) {
+    expectCallbackBuffer(false);
+}
+
+TEST_F(PicoBufferQueueStatusTest, PicoCallbackPreservesGraphicBufferReference) {
+    expectCallbackBuffer(true);
 }
 
 } // namespace android

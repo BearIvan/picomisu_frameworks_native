@@ -124,3 +124,12 @@ cc_test {
         "libnativewindow", "libcutils",
     ],
 }
+
+cc_test {
+    name: "picomisu_bufferitem_wire_probe",
+    gtest: false,
+    compile_multilib: "both",
+    cflags: ["-Wall", "-Werror"],
+    srcs: ["PicoBufferItemWire_probe.cpp"],
+    shared_libs: ["libgui", "libui", "libutils", "liblog"],
+}

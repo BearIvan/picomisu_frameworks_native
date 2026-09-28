@@ -51,6 +51,28 @@ BufferQueueConsumer::BufferQueueConsumer(const sp<BufferQueueCore>& core) :
 
 BufferQueueConsumer::~BufferQueueConsumer() {}
 
+status_t BufferQueueConsumer::onTransact(uint32_t code, const Parcel& data,
+                                       Parcel* reply, uint32_t flags) {
+    constexpr uint32_t kPicoConsumerConfiguration = 10000;
+    if (code != kPicoConsumerConfiguration) {
+        return BnGraphicBufferConsumer::onTransact(code, data, reply, flags);
+    }
+    CHECK_INTERFACE(IGraphicBufferConsumer, data, reply);
+    int32_t consumerId, logging;
+    if (data.readInt32(&consumerId) != NO_ERROR ||
+        data.readInt32(&logging) != NO_ERROR) {
+        return BAD_VALUE;
+    }
+    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    mCore->mPicoConsumerId = consumerId;
+    mCore->mPicoConsumerLogging = logging == 1;
+    mCore->mHasPicoConsumer = true;
+    if (mCore->mPicoConsumerLogging) {
+        BQ_LOGI("PICO consumer configured: id=%d", consumerId);
+    }
+    return NO_ERROR;
+}
+
 status_t BufferQueueConsumer::acquireBuffer(BufferItem* outBuffer,
         nsecs_t expectedPresent, uint64_t maxFrameNumber) {
     ATRACE_CALL();

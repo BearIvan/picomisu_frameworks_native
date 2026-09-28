@@ -803,6 +803,7 @@ status_t BufferQueueProducer::queueBuffer(int slot,
     int callbackTicket = 0;
     uint64_t currentFrameNumber = 0;
     BufferItem item;
+    bool picoConsumer = false;
     { // Autolock scope
         std::lock_guard<std::mutex> lock(mCore->mMutex);
 
@@ -970,6 +971,7 @@ status_t BufferQueueProducer::queueBuffer(int slot,
 
         // Take a ticket for the callback functions
         callbackTicket = mNextCallbackTicket++;
+        picoConsumer = mCore->mHasPicoConsumer;
 
         VALIDATE_CONSISTENCY();
     } // Autolock scope
@@ -977,7 +979,7 @@ status_t BufferQueueProducer::queueBuffer(int slot,
     // It is okay not to clear the GraphicBuffer when the consumer is SurfaceFlinger because
     // it is guaranteed that the BufferQueue is inside SurfaceFlinger's process and
     // there will be no Binder call
-    if (!mConsumerIsSurfaceFlinger) {
+    if (!mConsumerIsSurfaceFlinger && !picoConsumer) {
         item.mGraphicBuffer.clear();
     }
 
@@ -1008,6 +1010,12 @@ status_t BufferQueueProducer::queueBuffer(int slot,
 
         ++mCurrentCallbackTicket;
         mCallbackCondition.notify_all();
+    }
+
+    // PICO keeps the reference through the listener callback, then
+    // releases this local copy before frame timestamp processing.
+    if (picoConsumer) {
+        item.mGraphicBuffer.clear();
     }
 
     // Update and get FrameEventHistory.

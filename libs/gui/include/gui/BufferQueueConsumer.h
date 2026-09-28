@@ -34,6 +34,9 @@ public:
     explicit BufferQueueConsumer(const sp<BufferQueueCore>& core);
     ~BufferQueueConsumer() override;
 
+    status_t onTransact(uint32_t code, const Parcel& data, Parcel* reply,
+                        uint32_t flags = 0) override;
+
     // acquireBuffer attempts to acquire ownership of the next pending buffer in
     // the BufferQueue. If no buffer is pending then it returns
     // NO_BUFFER_AVAILABLE. If a buffer is successfully acquired, the

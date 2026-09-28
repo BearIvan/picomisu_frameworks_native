@@ -99,7 +99,10 @@ BufferQueueCore::BufferQueueCore() :
             HAL_DATASPACE_UNKNOWN),
     mLastQueuedSlot(INVALID_BUFFER_SLOT),
     mUniqueId(getUniqueId()),
-    mPicoVrStatus(0)
+    mPicoVrStatus(0),
+    mPicoConsumerId(0),
+    mPicoConsumerLogging(false),
+    mHasPicoConsumer(false)
 {
     int numStartingBuffers = getMaxBufferCountLocked();
     for (int s = 0; s < numStartingBuffers; s++) {

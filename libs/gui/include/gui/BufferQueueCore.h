@@ -358,6 +358,12 @@ private:
     // The downstream VR frame handling is not yet ported.
     int32_t mPicoVrStatus;
 
+    // Private consumer transaction 10000 records its id/log flag and marks
+    // callbacks that need the GraphicBuffer reference retained. Guarded by mMutex.
+    int32_t mPicoConsumerId;
+    bool mPicoConsumerLogging;
+    bool mHasPicoConsumer;
+
 }; // class BufferQueueCore
 
 } // namespace android
