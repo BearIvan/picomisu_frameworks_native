@@ -1102,6 +1102,10 @@ int BufferQueueProducer::query(int what, int *outValue) {
 
     int value;
     switch (what) {
+        case 10000: // PICO QUERY_SET_PVR_STATUS: an input/output query.
+            value = *outValue;
+            mCore->mPicoVrStatus = value;
+            break;
         case NATIVE_WINDOW_WIDTH:
             value = static_cast<int32_t>(mCore->mDefaultWidth);
             break;

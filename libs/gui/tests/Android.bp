@@ -111,3 +111,16 @@ cc_test {
         "libutils",
     ]
 }
+
+// Focused PICO QUERY compatibility checks; no graphics buffers are allocated.
+cc_test {
+    name: "picomisu_bufferqueue_test",
+    test_suites: ["device-tests"],
+    compile_multilib: "both",
+    cflags: ["-Wall", "-Werror"],
+    srcs: ["PicoBufferQueueStatus_test.cpp"],
+    shared_libs: [
+        "libbinder", "libgui", "libutils", "liblog", "libui",
+        "libnativewindow", "libcutils",
+    ],
+}

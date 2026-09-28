@@ -58,6 +58,7 @@ class BufferQueueCore : public virtual RefBase {
 
     friend class BufferQueueProducer;
     friend class BufferQueueConsumer;
+    friend class PicoBufferQueueStatusTest;
 
 public:
     // Used as a placeholder slot number when the value isn't pointing to an
@@ -351,6 +352,11 @@ private:
     OccupancyTracker mOccupancyTracker;
 
     const uint64_t mUniqueId;
+
+    // PICO producer QUERY 10000 stores a signed VR status value. Guarded by
+    // mMutex. This is distinct from the consumer's private transaction 10000.
+    // The downstream VR frame handling is not yet ported.
+    int32_t mPicoVrStatus;
 
 }; // class BufferQueueCore
 

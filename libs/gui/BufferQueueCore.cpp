@@ -98,7 +98,8 @@ BufferQueueCore::BufferQueueCore() :
     mSharedBufferCache(Rect::INVALID_RECT, 0, NATIVE_WINDOW_SCALING_MODE_FREEZE,
             HAL_DATASPACE_UNKNOWN),
     mLastQueuedSlot(INVALID_BUFFER_SLOT),
-    mUniqueId(getUniqueId())
+    mUniqueId(getUniqueId()),
+    mPicoVrStatus(0)
 {
     int numStartingBuffers = getMaxBufferCountLocked();
     for (int s = 0; s < numStartingBuffers; s++) {
