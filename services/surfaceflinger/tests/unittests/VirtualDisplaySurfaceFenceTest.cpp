@@ -1,5 +1,8 @@
 // Copyright 2026 Picomisu contributors
 // SPDX-License-Identifier: Apache-2.0
+#include <atomic>
+#include <chrono>
+#include <future>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <gui/IProducerListener.h>
@@ -63,6 +66,15 @@ protected:
         layer.clear();
     }
     sp<IGraphicBufferProducer> producer() { return display; }
+    void recreate(int usage, bool secure, bool twoBuffers) {
+        display.clear();
+        ON_CALL(*sink, query(NATIVE_WINDOW_CONSUMER_USAGE_BITS, _))
+                .WillByDefault(DoAll(SetArgPointee<1>(usage), Return(NO_ERROR)));
+        display = new VirtualDisplaySurface(flinger.getHwComposer(), std::nullopt,
+                                             sink, scratch, consumer, "fence-test", secure, twoBuffers);
+    }
+    uint64_t outputUsage() const { return display->mOutputUsage; }
+    void recomputeUsage(uint64_t ignored) { display->setOutputUsage(ignored); }
     sp<IProducerListener> connectListener() {
         sp<IProducerListener> listener;
         EXPECT_CALL(*sink, connect(_, NATIVE_WINDOW_API_EGL, false, _))
@@ -164,5 +176,102 @@ TEST_F(VirtualDisplaySurfaceFenceTest, RetainedListenerDoesNotKeepDisplayAlive) 
     EXPECT_EQ(nullptr, weak.promote().get());
     listener->onBufferReleasedWithFence(Fence::NO_FENCE, buffer->getId(), false);
     EXPECT_EQ(0, layer->notifications);
+}
+
+TEST_F(VirtualDisplaySurfaceFenceTest, OutputUsageIncludesSinkUsageAndIgnoresArgument) {
+    recreate(GRALLOC_USAGE_HW_TEXTURE, false, false);
+    const uint64_t expected = GRALLOC_USAGE_HW_TEXTURE | GRALLOC_USAGE_HW_COMPOSER;
+    EXPECT_EQ(expected, outputUsage());
+    recomputeUsage(UINT64_MAX);
+    EXPECT_EQ(expected, outputUsage());
+}
+
+TEST_F(VirtualDisplaySurfaceFenceTest, SecureVideoEncoderOutputAddsProtectedUsage) {
+    recreate(GRALLOC_USAGE_HW_VIDEO_ENCODER, true, false);
+    EXPECT_EQ(uint64_t(GRALLOC_USAGE_HW_VIDEO_ENCODER | GRALLOC_USAGE_HW_COMPOSER |
+                       GRALLOC_USAGE_PROTECTED), outputUsage());
+}
+
+TEST_F(VirtualDisplaySurfaceFenceTest, ProtectionRequiresBothSecureDisplayAndEncoderSink) {
+    recreate(GRALLOC_USAGE_HW_VIDEO_ENCODER, false, false);
+    EXPECT_EQ(0u, outputUsage() & GRALLOC_USAGE_PROTECTED);
+    recreate(GRALLOC_USAGE_HW_TEXTURE, true, false);
+    EXPECT_EQ(0u, outputUsage() & GRALLOC_USAGE_PROTECTED);
+}
+
+TEST_F(VirtualDisplaySurfaceFenceTest, OutputUsageSignExtendsLegacySinkQuery) {
+    recreate(static_cast<int32_t>(0x80000000u), false, false);
+    EXPECT_EQ(0xffffffff80000800ULL, outputUsage());
+}
+
+TEST_F(VirtualDisplaySurfaceFenceTest, TwoSinkBuffersOptionSetsMaxDequeuedCount) {
+    EXPECT_CALL(*sink, setMaxDequeuedBufferCount(2)).WillOnce(Return(NO_ERROR));
+    recreate(0, false, true);
+}
+
+TEST_F(VirtualDisplaySurfaceFenceTest, LastDisplayOwnerCanBeDroppedInsideListenerCallback) {
+    auto listener = connectListener();
+    ASSERT_EQ(NO_ERROR, display->setSingleLayer(layer, buffer));
+    wp<VirtualDisplaySurface> weak(display);
+    layer->onNotify = [&] {
+        display.clear();
+        EXPECT_NE(nullptr, weak.promote().get());
+    };
+    listener->onBufferReleasedWithFence(Fence::NO_FENCE, buffer->getId(), false);
+    EXPECT_EQ(1, layer->notifications);
+    EXPECT_EQ(nullptr, weak.promote().get());
+    layer->onNotify = {};
+    listener->onBufferReleasedWithFence(Fence::NO_FENCE, buffer->getId(), false);
+    EXPECT_EQ(1, layer->notifications);
+}
+
+TEST_F(VirtualDisplaySurfaceFenceTest, ConcurrentDisconnectWaitsForActiveListenerCallback) {
+    using namespace std::chrono_literals;
+    auto listener = connectListener();
+    ASSERT_EQ(NO_ERROR, display->setSingleLayer(layer, buffer));
+    std::promise<void> entered, allowed, disconnectStarted;
+    auto enteredFuture = entered.get_future();
+    auto allowedFuture = allowed.get_future();
+    auto startedFuture = disconnectStarted.get_future();
+    std::atomic<bool> callbackFinished{false};
+    layer->onNotify = [&] {
+        entered.set_value();
+        ASSERT_EQ(std::future_status::ready, allowedFuture.wait_for(5s));
+        callbackFinished = true;
+    };
+    auto release = std::async(std::launch::async, [&] {
+        listener->onBufferReleasedWithFence(Fence::NO_FENCE, buffer->getId(), false);
+    });
+    EXPECT_EQ(std::future_status::ready, enteredFuture.wait_for(5s));
+    auto transport = producer();
+    EXPECT_CALL(*sink, disconnect(NATIVE_WINDOW_API_EGL, IGraphicBufferProducer::DisconnectMode::Api))
+            .WillOnce([&](int, IGraphicBufferProducer::DisconnectMode) {
+                EXPECT_TRUE(callbackFinished.load());
+                return NO_ERROR;
+            });
+    auto disconnect = std::async(std::launch::async, [&] {
+        disconnectStarted.set_value();
+        return transport->disconnect(NATIVE_WINDOW_API_EGL);
+    });
+    EXPECT_EQ(std::future_status::ready, startedFuture.wait_for(5s));
+    EXPECT_EQ(std::future_status::timeout, disconnect.wait_for(50ms));
+    allowed.set_value();
+    release.get();
+    EXPECT_EQ(NO_ERROR, disconnect.get());
+    EXPECT_EQ(1, layer->notifications);
+    layer->onNotify = {};
+    listener->onBufferReleasedWithFence(Fence::NO_FENCE, buffer->getId(), false);
+    EXPECT_EQ(1, layer->notifications);
+}
+
+TEST_F(VirtualDisplaySurfaceFenceTest, SnapshotCallbacksCanRegisterWithoutChangingSnapshot) {
+    ASSERT_EQ(NO_ERROR, display->setSingleLayer(layer, buffer));
+    sp<GraphicBuffer> nextBuffer = new GraphicBuffer;
+    layer->onNotify = [&] { EXPECT_EQ(NO_ERROR, display->setSingleLayer(layer, nextBuffer)); };
+    EXPECT_EQ(NO_ERROR, display->notifySingleLayerBuffers());
+    EXPECT_EQ(1, layer->notifications);
+    layer->onNotify = {};
+    EXPECT_EQ(NO_ERROR, display->onBufferReleasedWithFence(Fence::NO_FENCE, nextBuffer->getId(), false));
+    EXPECT_EQ(2, layer->notifications);
 }
 } // namespace android

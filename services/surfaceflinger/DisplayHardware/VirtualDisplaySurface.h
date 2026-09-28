@@ -83,7 +83,8 @@ public:
                           const sp<IGraphicBufferProducer>& sink,
                           const sp<IGraphicBufferProducer>& bqProducer,
                           const sp<IGraphicBufferConsumer>& bqConsumer,
-                          const std::string& name, bool secure);
+                          const std::string& name, bool secure,
+                          bool useTwoSinkBuffers = false);
 
     //
     // DisplaySurface interface
@@ -103,6 +104,7 @@ public:
     virtual status_t notifySingleLayerBuffers();
 
 private:
+    friend class VirtualDisplaySurfaceFenceTest;
     enum Source {SOURCE_SINK = 0, SOURCE_SCRATCH = 1};
 
     virtual ~VirtualDisplaySurface();
@@ -279,6 +281,7 @@ private:
     Mutex mSingleLayerMutex;
     bool mMultiLayer = true;
     sp<VirtualDisplayProducerListener> mReleaseListener;
+    bool mUseTwoSinkBuffers;
 };
 
 // ---------------------------------------------------------------------------

@@ -1202,4 +1202,12 @@ status_t IGraphicBufferProducer::QueueBufferOutput::unflatten(
     return frameTimestamps.unflatten(buffer, size, fds, count);
 }
 
+status_t IGraphicBufferProducer::attachCachedBuffer(int* /*outSlot*/,
+                                                    const sp<GraphicBuffer>& /*buffer*/,
+                                                    uint64_t /*bufferId*/) {
+    return NO_ERROR;
+}
+
+void IGraphicBufferProducer::listenFreezeSelf() {}
+
 }; // namespace android

@@ -3498,7 +3498,8 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                         sp<VirtualDisplaySurface> vds =
                                 new VirtualDisplaySurface(getHwComposer(), displayId, state.surface,
                                                           bqProducer, bqConsumer,
-                                                          state.displayName, state.isSecure);
+                                                          state.displayName, state.isSecure,
+                                                          false /* useTwoSinkBuffers */);
 
                         dispSurface = vds;
                         producer = vds;

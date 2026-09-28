@@ -64,7 +64,8 @@ VirtualDisplaySurface::VirtualDisplaySurface(HWComposer& hwc,
                                              const sp<IGraphicBufferProducer>& sink,
                                              const sp<IGraphicBufferProducer>& bqProducer,
                                              const sp<IGraphicBufferConsumer>& bqConsumer,
-                                             const std::string& name, bool secure)
+                                             const std::string& name, bool secure,
+                                             bool useTwoSinkBuffers)
       : ConsumerBase(bqConsumer),
         mHwc(hwc),
         mDisplayId(displayId),
@@ -88,7 +89,8 @@ VirtualDisplaySurface::VirtualDisplaySurface(HWComposer& hwc,
         mMustRecompose(false),
         mForceHwcCopy(SurfaceFlinger::useHwcForRgbToYuv),
         mSecure(secure),
-        mSinkUsage(0) {
+        mSinkUsage(0),
+        mUseTwoSinkBuffers(useTwoSinkBuffers) {
     mSource[SOURCE_SINK] = sink;
     mSource[SOURCE_SCRATCH] = bqProducer;
 
@@ -121,6 +123,7 @@ VirtualDisplaySurface::VirtualDisplaySurface(HWComposer& hwc,
     mConsumer->setConsumerName(ConsumerBase::mName);
     mConsumer->setConsumerUsageBits(GRALLOC_USAGE_HW_COMPOSER);
     mConsumer->setDefaultBufferSize(sinkWidth, sinkHeight);
+    if (mUseTwoSinkBuffers) sink->setMaxDequeuedBufferCount(2);
     sink->setAsyncMode(true);
     IGraphicBufferProducer::QueueBufferOutput output;
     mSource[SOURCE_SCRATCH]->connect(nullptr, NATIVE_WINDOW_API_EGL, false, &output);
