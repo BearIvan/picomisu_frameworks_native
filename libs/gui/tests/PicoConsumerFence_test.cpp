@@ -62,11 +62,45 @@ class LatchConsumer : public ConsumerBase {
 public:
     explicit LatchConsumer(const sp<IGraphicBufferConsumer>& consumer) : ConsumerBase(consumer) {}
     int slot() { Mutex::Autolock lock(mMutex); return getLatchAcquireSlotLocked(); }
+    void fallback(void (*callback)(int), int argument) {
+        mPicoFrameCallback = callback;
+        mPicoFrameCallbackArgument = argument;
+    }
+    void notifyFrames() {
+        BufferItem item;
+        onFrameAvailable(item);
+        onFrameReplaced(item);
+    }
+    size_t callbackOffset() const {
+        return reinterpret_cast<const char*>(&mPicoFrameCallback) - reinterpret_cast<const char*>(this);
+    }
+    size_t argumentOffset() const {
+        return reinterpret_cast<const char*>(&mPicoFrameCallbackArgument) - reinterpret_cast<const char*>(this);
+    }
     status_t acquire(BufferItem* item) {
         Mutex::Autolock lock(mMutex);
         return acquireBufferLocked(item, 0);
     }
 };
+class OverriddenLatchConsumer : public LatchConsumer {
+public:
+    using LatchConsumer::LatchConsumer;
+    int getLatchAcquireSlotLocked() override { return 123; }
+};
+class FrameRecorder : public ConsumerBase::FrameAvailableListener {
+public:
+    void onFrameAvailable(const BufferItem&) override { ++available; }
+    void onFrameReplaced(const BufferItem&) override { ++replaced; }
+    int available = 0, replaced = 0;
+};
+static int fallbackCalls, fallbackArgument;
+static LatchConsumer* fallbackConsumer;
+static void recordFallback(int argument) {
+    ++fallbackCalls;
+    fallbackArgument = argument;
+    // Re-enter the API that takes mFrameAvailableMutex: callback must be unlocked.
+    fallbackConsumer->setFrameAvailableListener(wp<ConsumerBase::FrameAvailableListener>());
+}
 }
 
 // This fixture's friend access is only for waking an actual wait while holding
@@ -248,6 +282,76 @@ TEST_F(PicoConsumerFenceTest, ConsumerBaseRetainsLastSuccessfulAcquireSlot) {
     EXPECT_EQ(slot, tracked->slot());
     tracked->abandon();
     EXPECT_EQ(slot, tracked->slot());
+}
+
+TEST_F(PicoConsumerFenceTest, ReadyFreeBufferIsPreferredAfterModeActivation) {
+    sp<GraphicBuffer> first = buffer(0x200000000ULL), second = buffer(0x200000000ULL);
+    int firstSlot, secondSlot, dequeued;
+    sp<Fence> firstReady = new Fence, secondReady = new Fence, output;
+    attachFree(first, &firstSlot);
+    ASSERT_EQ(NO_ERROR, consumer->notifyFenceReady(firstReady, first->getId(), firstSlot));
+    ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION, dequeue(&dequeued, &output));
+    ASSERT_EQ(NO_ERROR, producer->cancelBuffer(dequeued, Fence::NO_FENCE));
+    first->usage = 0x200000000ULL;
+    attachFree(second, &secondSlot);
+    ASSERT_EQ(NO_ERROR, consumer->notifyFenceReady(secondReady, second->getId(), secondSlot));
+    ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION, dequeue(&dequeued, &output));
+    EXPECT_EQ(secondSlot, dequeued);
+    EXPECT_EQ(secondReady.get(), output.get());
+    EXPECT_EQ(0x200000000ULL, first->getUsage() & kMask);
+}
+
+TEST(PicoConsumerBaseAbi, FallbackRequiresCallbackAndNonSentinelArgument) {
+    sp<BufferQueueCore> core = new BufferQueueCore;
+    sp<LatchConsumer> tracked = new LatchConsumer(new BufferQueueConsumer(core));
+    fallbackConsumer = tracked.get();
+    fallbackCalls = 0;
+    tracked->notifyFrames();
+    tracked->fallback(nullptr, 7);
+    tracked->notifyFrames();
+    tracked->fallback(recordFallback, -1);
+    tracked->notifyFrames();
+    EXPECT_EQ(0, fallbackCalls);
+    tracked->fallback(recordFallback, 7);
+    tracked->notifyFrames();
+    EXPECT_EQ(2, fallbackCalls);
+    EXPECT_EQ(7, fallbackArgument);
+    fallbackConsumer = nullptr;
+}
+
+TEST(PicoConsumerBaseAbi, LiveListenerTakesPriorityAndExpiredListenerUsesFallback) {
+    sp<BufferQueueCore> core = new BufferQueueCore;
+    sp<LatchConsumer> tracked = new LatchConsumer(new BufferQueueConsumer(core));
+    fallbackConsumer = tracked.get();
+    fallbackCalls = 0;
+    tracked->fallback(recordFallback, 0);
+    sp<FrameRecorder> listener = new FrameRecorder;
+    tracked->setFrameAvailableListener(listener);
+    tracked->notifyFrames();
+    EXPECT_EQ(1, listener->available);
+    EXPECT_EQ(1, listener->replaced);
+    EXPECT_EQ(0, fallbackCalls);
+    listener.clear();
+    tracked->notifyFrames();
+    EXPECT_EQ(2, fallbackCalls);
+    EXPECT_EQ(0, fallbackArgument);
+    fallbackConsumer = nullptr;
+}
+
+TEST(PicoConsumerBaseAbi, LatchGetterDispatchesVirtually) {
+    sp<BufferQueueCore> core = new BufferQueueCore;
+    sp<LatchConsumer> tracked = new OverriddenLatchConsumer(new BufferQueueConsumer(core));
+    EXPECT_EQ(123, tracked->slot());
+}
+
+TEST(PicoConsumerBaseAbi, ObservedFactoryTailOffsetsMatch) {
+    sp<BufferQueueCore> core = new BufferQueueCore;
+    sp<LatchConsumer> tracked = new LatchConsumer(new BufferQueueConsumer(core));
+    EXPECT_EQ(sizeof(void*) == 8 ? 1672u : 1068u, tracked->callbackOffset());
+    EXPECT_EQ(sizeof(void*) == 8 ? 1680u : 1072u, tracked->argumentOffset());
+    auto baseOffset = reinterpret_cast<char*>(static_cast<RefBase*>(tracked.get())) -
+            reinterpret_cast<char*>(tracked.get());
+    EXPECT_EQ(sizeof(void*) == 8 ? 1688 : 1076, baseOffset);
 }
 
 } // namespace android

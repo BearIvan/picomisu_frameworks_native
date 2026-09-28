@@ -839,6 +839,8 @@ status_t BufferQueueProducer::queueBuffer(int slot,
 
     sp<IConsumerListener> frameAvailableListener;
     sp<IConsumerListener> frameReplacedListener;
+    sp<IProducerListener> droppedBufferListener;
+    uint64_t droppedBufferId = 0;
     int callbackTicket = 0;
     uint64_t currentFrameNumber = 0;
     BufferItem item;
@@ -961,18 +963,29 @@ status_t BufferQueueProducer::queueBuffer(int slot,
                 if (!last.mIsStale) {
                     mSlots[last.mSlot].mBufferState.freeQueued();
 
-                    // After leaving shared buffer mode, the shared buffer will
-                    // still be around. Mark it as no longer shared if this
-                    // operation causes it to be free.
-                    if (!mCore->mSharedBufferMode &&
-                            mSlots[last.mSlot].mBufferState.isFree()) {
-                        mSlots[last.mSlot].mBufferState.mShared = false;
-                    }
-                    // Don't put the shared buffer on the free list.
-                    if (!mSlots[last.mSlot].mBufferState.isShared()) {
+                    const sp<GraphicBuffer>& dropped = mSlots[last.mSlot].mGraphicBuffer;
+                    if (dropped != nullptr &&
+                            (dropped->getUsage() & 0xf00000000ULL) == 0x100000000ULL) {
+                        droppedBufferId = dropped->getId();
+                        droppedBufferListener = mCore->mConnectedProducerListener;
                         mCore->mActiveBuffers.erase(last.mSlot);
-                        mCore->mFreeBuffers.push_back(last.mSlot);
+                        mCore->mFreeSlots.insert(last.mSlot);
+                        mCore->clearBufferSlotLocked(last.mSlot);
                         output->bufferReplaced = true;
+                    } else {
+                        // After leaving shared buffer mode, the shared buffer will
+                        // still be around. Mark it as no longer shared if this
+                        // operation causes it to be free.
+                        if (!mCore->mSharedBufferMode &&
+                                mSlots[last.mSlot].mBufferState.isFree()) {
+                            mSlots[last.mSlot].mBufferState.mShared = false;
+                        }
+                        // Don't put the shared buffer on the free list.
+                        if (!mSlots[last.mSlot].mBufferState.isShared()) {
+                            mCore->mActiveBuffers.erase(last.mSlot);
+                            mCore->mFreeBuffers.push_back(last.mSlot);
+                            output->bufferReplaced = true;
+                        }
                     }
                 }
 
@@ -1049,6 +1062,13 @@ status_t BufferQueueProducer::queueBuffer(int slot,
 
         ++mCurrentCallbackTicket;
         mCallbackCondition.notify_all();
+    }
+
+    // Factory sends this after the consumer frame callback with neither queue
+    // nor callback mutex held. The payload is NO_FENCE, not the old acquire fence.
+    if (droppedBufferListener != nullptr) {
+        droppedBufferListener->onBufferReleasedWithFence(Fence::NO_FENCE,
+                                                         droppedBufferId, true);
     }
 
     // PICO keeps the reference through the listener callback, then

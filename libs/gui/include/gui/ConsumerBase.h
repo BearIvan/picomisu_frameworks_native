@@ -191,7 +191,7 @@ protected:
             uint64_t maxFrameNumber = 0);
 
     // Caller holds mMutex; retains the most recently acquired slot.
-    int getLatchAcquireSlotLocked();
+    virtual int getLatchAcquireSlotLocked();
 
     // releaseBufferLocked relinquishes control over a buffer, returning that
     // control to the BufferQueue.
@@ -277,6 +277,11 @@ protected:
     //
     // This mutex is intended to be locked by derived classes.
     mutable Mutex mMutex;
+
+    // PICO fallback used when the weak FrameAvailableListener cannot be promoted.
+    // Keep after mMutex: factory clients access these fields by offset.
+    void (*mPicoFrameCallback)(int) = nullptr;
+    int mPicoFrameCallbackArgument = -1;
 };
 
 // ----------------------------------------------------------------------------

@@ -114,6 +114,8 @@ void ConsumerBase::onFrameAvailable(const BufferItem& item) {
     if (listener != nullptr) {
         CB_LOGV("actually calling onFrameAvailable");
         listener->onFrameAvailable(item);
+    } else if (mPicoFrameCallback != nullptr && mPicoFrameCallbackArgument != -1) {
+        mPicoFrameCallback(mPicoFrameCallbackArgument);
     }
 }
 
@@ -129,6 +131,8 @@ void ConsumerBase::onFrameReplaced(const BufferItem &item) {
     if (listener != nullptr) {
         CB_LOGV("actually calling onFrameReplaced");
         listener->onFrameReplaced(item);
+    } else if (mPicoFrameCallback != nullptr && mPicoFrameCallbackArgument != -1) {
+        mPicoFrameCallback(mPicoFrameCallbackArgument);
     }
 }
 
