@@ -151,3 +151,12 @@ cc_test {
     srcs: ["PicoConsumerFence_probe.cpp"],
     shared_libs: ["libbinder", "libgui", "libui", "libutils", "liblog", "libnativewindow"],
 }
+
+cc_test {
+    name: "picomisu_display_config_probe",
+    gtest: false,
+    compile_multilib: "both",
+    cflags: ["-Wall", "-Werror"],
+    srcs: ["PicoDisplayConfig_probe.cpp"],
+    shared_libs: ["libbinder", "libgui", "libutils", "liblog"],
+}
