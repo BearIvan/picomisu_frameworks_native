@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <gui/Surface.h>
 #include <memory>
 
 #include <compositionengine/DisplaySurface.h>
@@ -45,6 +46,9 @@ struct RenderSurfaceCreationArgs {
 
     // The DisplaySurface for this surface
     sp<DisplaySurface> displaySurface;
+
+    // Explicit typed Surface, appended as in the PICO creation arguments.
+    sp<Surface> surface = nullptr;
 };
 
 /**
@@ -78,6 +82,11 @@ public:
     }
     RenderSurfaceCreationArgsBuilder& setDisplaySurface(sp<DisplaySurface> displaySurface) {
         mArgs.displaySurface = displaySurface;
+        return *this;
+    }
+
+    RenderSurfaceCreationArgsBuilder& setSurface(sp<Surface> surface) {
+        mArgs.surface = std::move(surface);
         return *this;
     }
 

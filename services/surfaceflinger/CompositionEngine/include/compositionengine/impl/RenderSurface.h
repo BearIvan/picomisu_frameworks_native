@@ -26,6 +26,8 @@ struct ANativeWindow;
 
 namespace android {
 
+class Surface;
+
 namespace compositionengine {
 
 class CompositionEngine;
@@ -69,6 +71,7 @@ public:
     sp<GraphicBuffer>& mutableGraphicBufferForTest();
     base::unique_fd& mutableBufferReadyForTest();
     void flipClientTarget(bool flip) override;
+    const sp<Surface>& getSurfaceForTest() const;
 
 private:
     const compositionengine::CompositionEngine& mCompositionEngine;
@@ -76,6 +79,8 @@ private:
 
     // ANativeWindow being rendered into
     const sp<ANativeWindow> mNativeWindow;
+    // Kept separately: ANativeWindow can also be a mock or another implementation.
+    const sp<Surface> mSurface;
     // Current buffer being rendered into
     sp<GraphicBuffer> mGraphicBuffer;
     const sp<DisplaySurface> mDisplaySurface;

@@ -25,6 +25,7 @@ struct ANativeWindow;
 namespace android {
 
 class IGraphicBufferProducer;
+class Surface;
 
 namespace surfaceflinger {
 
@@ -39,6 +40,9 @@ public:
 
     // Indicates that the surface should allocate its buffers now.
     virtual void preallocateBuffers() = 0;
+
+    // Typed Surface for the PICO direct-buffer path. Test windows may omit it.
+    virtual sp<Surface> getSurface() const;
 };
 
 namespace impl {

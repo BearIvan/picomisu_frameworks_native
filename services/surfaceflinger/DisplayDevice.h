@@ -27,6 +27,7 @@
 #include <android/native_window.h>
 #include <binder/IBinder.h>
 #include <gui/LayerState.h>
+#include <gui/Surface.h>
 #include <hardware/hwcomposer_defs.h>
 #include <math/mat4.h>
 #include <renderengine/RenderEngine.h>
@@ -258,6 +259,7 @@ struct DisplayDeviceCreationArgs {
     bool isVirtual{false};
     bool isSecure{false};
     sp<ANativeWindow> nativeWindow;
+    sp<Surface> surface;
     sp<compositionengine::DisplaySurface> displaySurface;
     int displayInstallOrientation{DisplayState::eOrientationDefault};
     bool hasWideColorGamut{false};

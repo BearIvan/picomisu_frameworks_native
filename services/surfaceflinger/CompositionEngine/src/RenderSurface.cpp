@@ -51,6 +51,7 @@ RenderSurface::RenderSurface(const CompositionEngine& compositionEngine, Display
       : mCompositionEngine(compositionEngine),
         mDisplay(display),
         mNativeWindow(args.nativeWindow),
+        mSurface(args.surface),
         mDisplaySurface(args.displaySurface),
         mSize(args.displayWidth, args.displayHeight) {
     LOG_ALWAYS_FATAL_IF(!mNativeWindow);
@@ -256,6 +257,10 @@ void RenderSurface::setPageFlipCountForTest(std::uint32_t count) {
 
 void RenderSurface::setSizeForTest(const ui::Size& size) {
     mSize = size;
+}
+
+const sp<Surface>& RenderSurface::getSurfaceForTest() const {
+    return mSurface;
 }
 
 sp<GraphicBuffer>& RenderSurface::mutableGraphicBufferForTest() {

@@ -25,6 +25,8 @@
 #include <compositionengine/mock/NativeWindow.h>
 #include <compositionengine/mock/OutputLayer.h>
 #include <gtest/gtest.h>
+#include <gui/BufferQueueCore.h>
+#include <gui/BufferQueueProducer.h>
 #include <renderengine/mock/RenderEngine.h>
 
 #include "MockHWComposer.h"
@@ -81,6 +83,21 @@ public:
 TEST_F(RenderSurfaceTest, canInstantiate) {
     EXPECT_TRUE(mSurface.isValid());
 }
+
+TEST_F(RenderSurfaceTest, typedSurfaceIsOptionalForMockWindows) {
+    EXPECT_EQ(nullptr, mSurface.getSurfaceForTest().get());
+}
+
+TEST_F(RenderSurfaceTest, typedSurfaceSurvivesCreationArguments) {
+    sp<BufferQueueCore> core = new BufferQueueCore;
+    sp<Surface> surface = new Surface(new BufferQueueProducer(core));
+    auto args = RenderSurfaceCreationArgsBuilder().setDisplayWidth(64).setDisplayHeight(64)
+            .setNativeWindow(mNativeWindow).setDisplaySurface(mDisplaySurface)
+            .setSurface(surface).build();
+    impl::RenderSurface renderSurface(mCompositionEngine, mDisplay, std::move(args));
+    EXPECT_EQ(surface.get(), renderSurface.getSurfaceForTest().get());
+}
+
 
 /* ------------------------------------------------------------------------
  * RenderSurface::initialize()
