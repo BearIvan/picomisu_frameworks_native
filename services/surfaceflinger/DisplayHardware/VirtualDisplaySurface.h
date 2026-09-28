@@ -17,6 +17,7 @@
 #ifndef ANDROID_SF_VIRTUAL_DISPLAY_SURFACE_H
 #define ANDROID_SF_VIRTUAL_DISPLAY_SURFACE_H
 
+#include <map>
 #include <optional>
 #include <string>
 
@@ -33,6 +34,7 @@ namespace android {
 
 class HWComposer;
 class IProducerListener;
+class VirtualDisplayProducerListener;
 
 /* This DisplaySurface implementation supports virtual displays, where GLES
  * and/or HWC compose into a buffer that is then passed to an arbitrary
@@ -93,6 +95,12 @@ public:
     virtual void dumpAsString(String8& result) const;
     virtual void resizeBuffers(const uint32_t w, const uint32_t h);
     virtual const sp<Fence>& getClientTargetAcquireFence() const override;
+    status_t setSingleLayer(const sp<Layer>& layer, const sp<GraphicBuffer>& buffer) override;
+    void setMultiLayerFlag(bool enabled) override;
+    bool getMultiLayerFlag() override;
+    virtual status_t onBufferReleasedWithFence(const sp<Fence>& fence, uint64_t bufferId,
+                                               bool replaced);
+    virtual status_t notifySingleLayerBuffers();
 
 private:
     enum Source {SOURCE_SINK = 0, SOURCE_SCRATCH = 1};
@@ -260,6 +268,17 @@ private:
     bool mForceHwcCopy;
     bool mSecure;
     int mSinkUsage;
+
+    struct SingleLayerFrame : public LightRefBase<SingleLayerFrame> {
+        int slot;
+        sp<GraphicBuffer> buffer;
+        sp<Layer> layer;
+        int outstanding;
+    };
+    std::map<uint64_t, sp<SingleLayerFrame>> mSingleLayerFrames;
+    Mutex mSingleLayerMutex;
+    bool mMultiLayer = true;
+    sp<VirtualDisplayProducerListener> mReleaseListener;
 };
 
 // ---------------------------------------------------------------------------

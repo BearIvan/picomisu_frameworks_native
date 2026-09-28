@@ -28,6 +28,13 @@
 #include <system/window.h>
 
 // ---------------------------------------------------------------------------
+#include <climits>
+#include <vector>
+#include <compositionengine/Layer.h>
+#include <compositionengine/impl/LayerCompositionState.h>
+#include <gui/IProducerListener.h>
+#include "Layer.h"
+
 namespace android {
 // ---------------------------------------------------------------------------
 
@@ -121,6 +128,63 @@ VirtualDisplaySurface::VirtualDisplaySurface(HWComposer& hwc,
 
 VirtualDisplaySurface::~VirtualDisplaySurface() {
     mSource[SOURCE_SCRATCH]->disconnect(NATIVE_WINDOW_API_EGL);
+}
+
+status_t VirtualDisplaySurface::setSingleLayer(const sp<Layer>& layer,
+                                             const sp<GraphicBuffer>& buffer) {
+    Mutex::Autolock lock(mSingleLayerMutex);
+    if (!layer || !buffer || !layer->getCompositionLayer()) return BAD_VALUE;
+    const auto it = mSingleLayerFrames.find(buffer->getId());
+    const int previous = it == mSingleLayerFrames.end() ? 0 : it->second->outstanding;
+    // Avoid signed overflow on malformed/unbounded producer traffic.
+    if (previous == INT_MAX) return BAD_VALUE;
+    sp<SingleLayerFrame> frame = new SingleLayerFrame;
+    frame->slot = layer->getCompositionLayer()->getState().frontEnd.bufferSlot;
+    frame->buffer = buffer;
+    frame->layer = layer;
+    frame->outstanding = previous + 1;
+    mSingleLayerFrames[buffer->getId()] = frame;
+    return NO_ERROR;
+}
+
+void VirtualDisplaySurface::setMultiLayerFlag(bool enabled) {
+    mMultiLayer = enabled;
+}
+
+bool VirtualDisplaySurface::getMultiLayerFlag() {
+    return mMultiLayer;
+}
+
+status_t VirtualDisplaySurface::onBufferReleasedWithFence(const sp<Fence>& fence,
+                                                         uint64_t bufferId, bool replaced) {
+    if (bufferId == UINT64_MAX) return BAD_VALUE;
+    sp<SingleLayerFrame> frame;
+    {
+        Mutex::Autolock lock(mSingleLayerMutex);
+        if (mSingleLayerFrames.empty()) return NO_ERROR;
+        const auto it = mSingleLayerFrames.find(bufferId);
+        if (it == mSingleLayerFrames.end()) return BAD_VALUE;
+        frame = it->second;
+        if (--frame->outstanding > 0) return NO_ERROR;
+        mSingleLayerFrames.erase(it);
+    }
+    // Layer callbacks can register another frame. Never hold the registry lock here.
+    frame->layer->notifyFenceReady(fence, frame->buffer, frame->slot);
+    if (replaced) frame->layer->releasePendingBuffer(systemTime(SYSTEM_TIME_MONOTONIC));
+    return NO_ERROR;
+}
+
+status_t VirtualDisplaySurface::notifySingleLayerBuffers() {
+    std::vector<sp<SingleLayerFrame>> frames;
+    {
+        Mutex::Autolock lock(mSingleLayerMutex);
+        for (const auto& entry : mSingleLayerFrames) frames.push_back(entry.second);
+    }
+    // Factory disconnect notifies a snapshot; it does not erase registrations.
+    for (const auto& frame : frames) {
+        frame->layer->notifyFenceReady(Fence::NO_FENCE, frame->buffer, frame->slot);
+    }
+    return NO_ERROR;
 }
 
 status_t VirtualDisplaySurface::beginFrame(bool mustRecompose) {
@@ -557,11 +621,19 @@ int VirtualDisplaySurface::query(int what, int* value) {
     return NO_ERROR;
 }
 
-status_t VirtualDisplaySurface::connect(const sp<IProducerListener>& listener,
+status_t VirtualDisplaySurface::connect(const sp<IProducerListener>& /*listener*/,
         int api, bool producerControlledByApp,
         QueueBufferOutput* output) {
     QueueBufferOutput qbo;
-    status_t result = mSource[SOURCE_SINK]->connect(listener, api,
+    mReleaseListener = new VirtualDisplayProducerListener;
+    // A sink may retain its listener after this display is destroyed. A weak
+    // capture avoids both a reference cycle and the factory raw-this lifetime risk.
+    const wp<VirtualDisplaySurface> weakThis(this);
+    mReleaseListener->setCallback([weakThis](const sp<Fence>& fence, uint64_t id, bool replaced) {
+        const sp<VirtualDisplaySurface> display = weakThis.promote();
+        return display ? display->onBufferReleasedWithFence(fence, id, replaced) : NO_INIT;
+    });
+    status_t result = mSource[SOURCE_SINK]->connect(mReleaseListener, api,
             producerControlledByApp, &qbo);
     if (result == NO_ERROR) {
         updateQueueBufferOutput(std::move(qbo));
@@ -572,6 +644,8 @@ status_t VirtualDisplaySurface::connect(const sp<IProducerListener>& listener,
 }
 
 status_t VirtualDisplaySurface::disconnect(int api, DisconnectMode mode) {
+    if (mReleaseListener) mReleaseListener->setCallback({});
+    notifySingleLayerBuffers();
     return mSource[SOURCE_SINK]->disconnect(api, mode);
 }
 
