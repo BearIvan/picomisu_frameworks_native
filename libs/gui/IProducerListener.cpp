@@ -25,6 +25,7 @@ enum {
     ON_BUFFER_RELEASED = IBinder::FIRST_CALL_TRANSACTION,
     NEEDS_RELEASE_NOTIFY,
     ON_BUFFERS_DISCARDED,
+    ON_BUFFER_RELEASED_WITH_FENCE,
 };
 
 class BpProducerListener : public BpInterface<IProducerListener>
@@ -64,6 +65,24 @@ public:
         data.writeInt32Vector(discardedSlots);
         remote()->transact(ON_BUFFERS_DISCARDED, data, &reply, IBinder::FLAG_ONEWAY);
     }
+
+    void onBufferReleasedWithFence(const sp<Fence>& fence, uint64_t bufferId,
+                                  bool flag) override {
+        if (fence == nullptr) {
+            ALOGE("IProducerListener: null release fence");
+            return;
+        }
+        Parcel data, reply;
+        status_t result = data.writeInterfaceToken(IProducerListener::getInterfaceDescriptor());
+        if (result == NO_ERROR) result = data.write(*fence);
+        if (result == NO_ERROR) result = data.writeUint64(bufferId);
+        if (result == NO_ERROR) result = data.writeBool(flag);
+        if (result != NO_ERROR) {
+            ALOGE("IProducerListener: failed to write release fence: %d", result);
+            return;
+        }
+        remote()->transact(ON_BUFFER_RELEASED_WITH_FENCE, data, &reply, IBinder::FLAG_ONEWAY);
+    }
 };
 
 // Out-of-line virtual method definition to trigger vtable emission in this
@@ -87,6 +106,11 @@ public:
 
     virtual void onBuffersDiscarded(const std::vector<int32_t>& discardedSlots) override {
         return mBase->onBuffersDiscarded(discardedSlots);
+    }
+
+    void onBufferReleasedWithFence(const sp<Fence>& fence, uint64_t bufferId,
+                                  bool flag) override {
+        mBase->onBufferReleasedWithFence(fence, bufferId, flag);
     }
 };
 
@@ -115,6 +139,21 @@ status_t BnProducerListener::onTransact(uint32_t code, const Parcel& data,
             onBuffersDiscarded(discardedSlots);
             return NO_ERROR;
         }
+        case ON_BUFFER_RELEASED_WITH_FENCE: {
+            CHECK_INTERFACE(IProducerListener, data, reply);
+            sp<Fence> fence = new Fence;
+            uint64_t bufferId;
+            bool flag;
+            status_t result = data.read(*fence);
+            if (result == NO_ERROR) result = data.readUint64(&bufferId);
+            if (result == NO_ERROR) result = data.readBool(&flag);
+            if (result != NO_ERROR) {
+                ALOGE("ON_BUFFER_RELEASED_WITH_FENCE: malformed payload: %d", result);
+                return result;
+            }
+            onBufferReleasedWithFence(fence, bufferId, flag);
+            return NO_ERROR;
+        }
     }
     return BBinder::onTransact(code, data, reply, flags);
 }
@@ -128,6 +167,29 @@ bool BnProducerListener::needsReleaseNotify() {
 }
 
 void BnProducerListener::onBuffersDiscarded(const std::vector<int32_t>& /*discardedSlots*/) {
+}
+
+void BnProducerListener::onBufferReleasedWithFence(const sp<Fence>& /*fence*/,
+                                                 uint64_t /*bufferId*/, bool /*flag*/) {
+}
+
+VirtualDisplayProducerListener::~VirtualDisplayProducerListener() = default;
+
+void VirtualDisplayProducerListener::setCallback(
+        std::function<int(const sp<Fence>&, uint64_t, bool)> callback) {
+    Mutex::Autolock lock(mCallbackMutex);
+    mCallback = callback;
+}
+
+void VirtualDisplayProducerListener::onBufferReleasedWithFence(
+        const sp<Fence>& fence, uint64_t bufferId, bool flag) {
+    Mutex::Autolock lock(mCallbackMutex);
+    if (mCallback) {
+        // Factory ignores the callback's int result; the listener returns void.
+        mCallback(fence, bufferId, flag);
+    } else {
+        ALOGE("VirtualDisplayProducerListener: no release-fence callback");
+    }
 }
 
 } // namespace android

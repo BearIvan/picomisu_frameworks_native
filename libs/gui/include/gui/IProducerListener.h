@@ -17,12 +17,15 @@
 #ifndef ANDROID_GUI_IPRODUCERLISTENER_H
 #define ANDROID_GUI_IPRODUCERLISTENER_H
 
+#include <functional>
 #include <vector>
 
 #include <android/hardware/graphics/bufferqueue/1.0/IProducerListener.h>
 #include <android/hardware/graphics/bufferqueue/2.0/IProducerListener.h>
 #include <binder/IInterface.h>
 #include <hidl/HybridInterface.h>
+#include <ui/Fence.h>
+#include <utils/Mutex.h>
 #include <utils/RefBase.h>
 
 namespace android {
@@ -49,6 +52,11 @@ public:
     // onBuffersFreed is called from IGraphicBufferConsumer::discardFreeBuffers
     // to notify the producer that certain free buffers are discarded by the consumer.
     virtual void onBuffersDiscarded(const std::vector<int32_t>& slots) = 0; // Asynchronous
+
+    // PICO Binder transaction 4 carries a flattened Fence, a buffer ID and a
+    // boolean flag. This callback follows onBuffersDiscarded in the vtable.
+    virtual void onBufferReleasedWithFence(const sp<Fence>& fence, uint64_t bufferId,
+                                          bool flag) = 0; // Asynchronous
 };
 
 class IProducerListener : public ProducerListener, public IInterface
@@ -71,6 +79,26 @@ public:
             Parcel* reply, uint32_t flags = 0);
     virtual bool needsReleaseNotify();
     virtual void onBuffersDiscarded(const std::vector<int32_t>& slots);
+    virtual void onBufferReleasedWithFence(const sp<Fence>& fence, uint64_t bufferId,
+                                          bool flag);
+};
+
+// Factory SurfaceFlinger installs a callback on this producer listener. Keep
+// the callback before the mutex: its layout is used by factory inline callers.
+class VirtualDisplayProducerListener : public BnProducerListener
+{
+public:
+    VirtualDisplayProducerListener() = default;
+    ~VirtualDisplayProducerListener() override;
+    void onBufferReleased() override {}
+    bool needsReleaseNotify() override { return false; }
+    void onBufferReleasedWithFence(const sp<Fence>& fence, uint64_t bufferId,
+                                  bool flag) override;
+    void setCallback(std::function<int(const sp<Fence>&, uint64_t, bool)> callback);
+
+private:
+    std::function<int(const sp<Fence>&, uint64_t, bool)> mCallback;
+    Mutex mCallbackMutex;
 };
 
 class DummyProducerListener : public BnProducerListener
