@@ -186,6 +186,19 @@ void BufferLayerConsumer::setReleaseFence(const sp<Fence>& fence) {
     }
 }
 
+void BufferLayerConsumer::notifyFenceReady(const sp<Fence>& fence,
+                                          const sp<GraphicBuffer>& buffer, int slot) {
+    Mutex::Autolock lock(mMutex);
+    // A late callback must not dereference the disconnected consumer.
+    if (mAbandoned || mConsumer == nullptr) return;
+    if (mPendingRelease.isPending && mPendingRelease.graphicBuffer != nullptr && buffer != nullptr &&
+        mPendingRelease.graphicBuffer->getId() == buffer->getId() &&
+        mPendingRelease.currentTexture == slot) {
+        addReleaseFenceLocked(slot, buffer, fence);
+    }
+    mConsumer->notifyFenceReady(fence, buffer != nullptr ? buffer->getId() : 0, slot);
+}
+
 bool BufferLayerConsumer::releasePendingBuffer() {
     if (!mPendingRelease.isPending) {
         BLC_LOGV("Pending buffer already released");

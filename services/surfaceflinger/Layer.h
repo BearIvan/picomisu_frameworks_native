@@ -532,6 +532,7 @@ public:
 
     // If a buffer was replaced this frame, release the former buffer
     virtual void releasePendingBuffer(nsecs_t /*dequeueReadyTime*/) { }
+    virtual void notifyFenceReady(const sp<Fence>&, const sp<GraphicBuffer>&, int) {}
 
     // For Animation Hint
     virtual bool isScreenshot() const { return false; }

@@ -36,6 +36,7 @@ cc_test {
         ":libsurfaceflinger_sources",
         "libsurfaceflinger_unittest_main.cpp",
         "CachingTest.cpp",
+        "BufferLayerConsumerFenceTest.cpp",
 	"CompositionTest.cpp",
         "DispSyncSourceTest.cpp",
         "DisplayIdentificationTest.cpp",

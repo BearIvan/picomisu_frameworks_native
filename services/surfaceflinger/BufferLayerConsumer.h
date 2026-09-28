@@ -104,6 +104,7 @@ public:
     // fences can be set for a given buffer; they will be merged into a single
     // union fence.
     void setReleaseFence(const sp<Fence>& fence);
+    void notifyFenceReady(const sp<Fence>& fence, const sp<GraphicBuffer>& buffer, int slot);
 
     bool releasePendingBuffer();
 
@@ -360,6 +361,7 @@ private:
     // A release that is pending on the receipt of a new release fence from
     // presentDisplay
     PendingRelease mPendingRelease;
+    friend class BufferLayerConsumerFenceTest;
 };
 
 // ----------------------------------------------------------------------------

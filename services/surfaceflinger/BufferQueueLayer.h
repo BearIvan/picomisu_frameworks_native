@@ -48,6 +48,7 @@ public:
 
     // If a buffer was replaced this frame, release the former buffer
     void releasePendingBuffer(nsecs_t dequeueReadyTime) override;
+    void notifyFenceReady(const sp<Fence>& fence, const sp<GraphicBuffer>& buffer, int slot) override;
 
     void setDefaultBufferSize(uint32_t w, uint32_t h) override;
 

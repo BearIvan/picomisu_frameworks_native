@@ -68,6 +68,11 @@ bool BufferQueueLayer::getTransformToDisplayInverse() const {
     return mConsumer->getTransformToDisplayInverse();
 }
 
+void BufferQueueLayer::notifyFenceReady(const sp<Fence>& fence,
+                                       const sp<GraphicBuffer>& buffer, int slot) {
+    mConsumer->notifyFenceReady(fence, buffer, slot);
+}
+
 void BufferQueueLayer::releasePendingBuffer(nsecs_t dequeueReadyTime) {
     if (!mConsumer->releasePendingBuffer()) {
         return;
