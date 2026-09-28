@@ -294,6 +294,12 @@ public:
         Parcel data, reply;
         data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
         data.writeInt32(what);
+        // PICO 5.13.7 consumes a second int32 in QUERY requests. Its private
+        // command 10000 uses the supplied value as a VR status input.
+        // Standard Android queries are output-only; send zero for them so an
+        // uninitialized caller output is never read.
+        constexpr int kPicoQuerySetPvrStatus = 10000;
+        data.writeInt32(what == kPicoQuerySetPvrStatus ? *value : 0);
         status_t result = remote()->transact(QUERY, data, &reply);
         if (result != NO_ERROR) {
             return result;
@@ -883,6 +889,11 @@ status_t BnGraphicBufferProducer::onTransact(
             CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
             int value = 0;
             int what = data.readInt32();
+            // Consume the PICO input payload while remaining compatible with
+            // ordinary AOSP clients that only send the query identifier.
+            if (data.dataAvail() >= sizeof(int32_t)) {
+                value = data.readInt32();
+            }
             int res = query(what, &value);
             reply->writeInt32(value);
             reply->writeInt32(res);
