@@ -36,7 +36,9 @@
 
 namespace android {
 
-BufferQueueLayer::BufferQueueLayer(const LayerCreationArgs& args) : BufferLayer(args) {}
+BufferQueueLayer::BufferQueueLayer(const LayerCreationArgs& args)
+      : BufferLayer(args),
+        mPicoSingleLayerCandidate((args.flags & DisplayState::ePicoSingleLayer) != 0) {}
 
 BufferQueueLayer::~BufferQueueLayer() {
     mConsumer->abandon();
@@ -604,6 +606,10 @@ void BufferQueueLayer::onFirstRef() {
     mConsumer->setConsumerUsageBits(getEffectiveUsage(0));
     mConsumer->setContentsChangedListener(this);
     mConsumer->setName(mName);
+
+    if (mPicoSingleLayerCandidate && SurfaceFlinger::sPicoSkipSingleLayer) {
+        mProducer->setMaxDequeuedBufferCount(-2);
+    }
 
     // BufferQueueCore::mMaxDequeuedBufferCount is default to 1
     if (!mFlinger->isLayerTripleBufferingDisabled()) {

@@ -166,6 +166,7 @@ filegroup {
         "Scheduler/VSyncModulator.cpp",
         "StartPropertySetThread.cpp",
         "SurfaceFlinger.cpp",
+        "PicoSingleLayerComposition.cpp",
         "SurfaceInterceptor.cpp",
         "SurfaceTracing.cpp",
         "TimeStats/TimeStats.cpp",

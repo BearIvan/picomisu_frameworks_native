@@ -469,6 +469,7 @@ public:
                 const Rect& layerStackRect,
                 const Rect& displayRect);
         void setDisplaySize(const sp<IBinder>& token, uint32_t width, uint32_t height);
+        void setDisplayFlags(const sp<IBinder>& token, uint32_t flags);
         void setAnimationTransaction();
         void setEarlyWakeup();
     };

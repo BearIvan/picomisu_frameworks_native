@@ -65,6 +65,7 @@ public:
     bool framePresentTimeIsCurrent() const override;
 
 private:
+    bool mPicoSingleLayerCandidate = false;
     nsecs_t getDesiredPresentTime() override;
     std::shared_ptr<FenceTime> getCurrentFenceTime() const override;
 

@@ -186,7 +186,8 @@ DisplayState::DisplayState() :
     viewport(Rect::EMPTY_RECT),
     frame(Rect::EMPTY_RECT),
     width(0),
-    height(0) {
+    height(0),
+    flags(0) {
 }
 
 status_t DisplayState::write(Parcel& output) const {
@@ -199,6 +200,7 @@ status_t DisplayState::write(Parcel& output) const {
     output.write(frame);
     output.writeUint32(width);
     output.writeUint32(height);
+    output.writeUint32(flags);
     return NO_ERROR;
 }
 
@@ -212,10 +214,15 @@ status_t DisplayState::read(const Parcel& input) {
     input.read(frame);
     width = input.readUint32();
     height = input.readUint32();
+    flags = input.readUint32();
     return NO_ERROR;
 }
 
 void DisplayState::merge(const DisplayState& other) {
+    if (other.what & eDisplayFlagsChanged) {
+        what |= eDisplayFlagsChanged;
+        flags = other.flags;
+    }
     if (other.what & eSurfaceChanged) {
         what |= eSurfaceChanged;
         surface = other.surface;

@@ -2215,6 +2215,46 @@ TEST_F(HandleTransactionLockedTest, processesDisplayHeightChanges) {
  * SurfaceFlinger::setDisplayStateLocked
  */
 
+TEST_F(DisplayTransactionTest, PicoFlagsUpdateRequestsDisplayTransaction) {
+    auto display = SimplePrimaryDisplayCase::Display::makeFakeExistingDisplayInjector(this);
+    display.inject();
+    DisplayState state;
+    state.token = display.token();
+    state.what = DisplayState::eDisplayFlagsChanged;
+    state.flags = 0xfed12345;
+    EXPECT_EQ(eDisplayTransactionNeeded, mFlinger.setDisplayStateLocked(state));
+    EXPECT_EQ(state.flags, getCurrentDisplayState(state.token).flags);
+    EXPECT_EQ(0u, mFlinger.setDisplayStateLocked(state));
+}
+TEST_F(DisplayTransactionTest, PicoFlagsWithoutChangeMaskAreIgnored) {
+    auto display = SimplePrimaryDisplayCase::Display::makeFakeExistingDisplayInjector(this);
+    display.inject();
+    DisplayState state;
+    state.token = display.token();
+    state.flags = DisplayState::ePicoSingleLayer;
+    EXPECT_EQ(0u, mFlinger.setDisplayStateLocked(state));
+    EXPECT_EQ(0u, getCurrentDisplayState(state.token).flags);
+}
+TEST_F(DisplayTransactionTest, PicoFlagsReachLiveDisplayAndCanBeCleared) {
+    auto display = SimplePrimaryDisplayCase::Display::makeFakeExistingDisplayInjector(this);
+    display.inject();
+    DisplayState state;
+    state.token = display.token();
+    state.what = DisplayState::eDisplayFlagsChanged;
+    state.flags = DisplayState::ePicoSingleLayer | 0x80000000;
+    EXPECT_EQ(eDisplayTransactionNeeded, mFlinger.setDisplayStateLocked(state));
+    mFlinger.handleTransactionLocked(eDisplayTransactionNeeded);
+    auto device = getDisplayDevice(state.token);
+    ASSERT_NE(nullptr, device.get());
+    EXPECT_EQ(state.flags, device->getDisplayFlags());
+    EXPECT_TRUE(device->usesPicoSingleLayer());
+    state.flags = 0;
+    EXPECT_EQ(eDisplayTransactionNeeded, mFlinger.setDisplayStateLocked(state));
+    mFlinger.handleTransactionLocked(eDisplayTransactionNeeded);
+    EXPECT_EQ(0u, device->getDisplayFlags());
+    EXPECT_FALSE(device->usesPicoSingleLayer());
+}
+
 TEST_F(DisplayTransactionTest, setDisplayStateLockedDoesNothingWithUnknownDisplay) {
     // --------------------------------------------------------------------
     // Preconditions

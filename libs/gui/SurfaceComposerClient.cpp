@@ -1252,6 +1252,12 @@ void SurfaceComposerClient::Transaction::setDisplayProjection(const sp<IBinder>&
     mForceSynchronous = true; // TODO: do we actually still need this?
 }
 
+void SurfaceComposerClient::Transaction::setDisplayFlags(const sp<IBinder>& token, uint32_t flags) {
+    DisplayState& state(getDisplayState(token));
+    state.flags = flags;
+    state.what |= DisplayState::eDisplayFlagsChanged;
+}
+
 void SurfaceComposerClient::Transaction::setDisplaySize(const sp<IBinder>& token, uint32_t width, uint32_t height) {
     DisplayState& s(getDisplayState(token));
     s.width = width;

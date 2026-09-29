@@ -238,3 +238,12 @@ cc_test {
     srcs: ["PicoDequeueCount_probe.cpp"],
     shared_libs: ["libgui", "libbinder", "libutils", "liblog"],
 }
+
+cc_test {
+    name: "picomisu_display_flags_probe",
+    gtest: false,
+    compile_multilib: "both",
+    cflags: ["-Wall", "-Werror"],
+    srcs: ["PicoDisplayFlags_probe.cpp"],
+    shared_libs: ["libgui", "libbinder", "libui", "libutils"],
+}

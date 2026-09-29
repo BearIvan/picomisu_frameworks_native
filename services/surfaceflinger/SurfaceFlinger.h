@@ -1114,6 +1114,9 @@ private:
     bool mVsyncSourceReliableOnDoze = false;
     bool mPluggableVsyncPrioritized = false;
     bool mDebugDisableHWC = false;
+    static const bool sPicoSkipSingleLayer;
+    // PICO latches rendering fallback after marked buffers or an attach failure.
+    bool mPicoSingleLayerFallback = false;
     bool mDebugDisableTransformHint = false;
     volatile nsecs_t mDebugInTransaction = 0;
     bool mForceFullDamage = false;

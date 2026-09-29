@@ -226,7 +226,8 @@ struct DisplayState {
         eSurfaceChanged = 0x01,
         eLayerStackChanged = 0x02,
         eDisplayProjectionChanged = 0x04,
-        eDisplaySizeChanged = 0x08
+        eDisplaySizeChanged = 0x08,
+        eDisplayFlagsChanged = 0x10
     };
 
     DisplayState();
@@ -253,6 +254,8 @@ struct DisplayState {
     Rect frame;
 
     uint32_t width, height;
+    uint32_t flags;
+    static constexpr uint32_t ePicoSingleLayer = 1u << 20;
 
     status_t write(Parcel& output) const;
     status_t read(const Parcel& input);

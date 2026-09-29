@@ -49,6 +49,7 @@ public:
     MOCK_METHOD0(flip, void());
     MOCK_CONST_METHOD1(dump, void(std::string& result));
     MOCK_CONST_METHOD0(getPageFlipCount, std::uint32_t());
+    MOCK_METHOD1(attachBuffer, status_t(sp<GraphicBuffer>&));
 };
 
 } // namespace android::compositionengine::mock

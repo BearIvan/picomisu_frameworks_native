@@ -67,7 +67,8 @@ DisplayDevice::DisplayDevice(DisplayDeviceCreationArgs&& args)
         mIsPrimary(args.isPrimary),
         mIsPowerModeOverride(false),
         mIsAnimating(false),
-        mIsDisplayBuiltInType(false) {
+        mIsDisplayBuiltInType(false),
+        mDisplayFlags(args.flags) {
     mCompositionDisplay->createRenderSurface(
             compositionengine::RenderSurfaceCreationArgs{ANativeWindow_getWidth(
                                                                  args.nativeWindow.get()),

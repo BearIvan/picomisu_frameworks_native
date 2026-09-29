@@ -84,6 +84,9 @@ public:
 
     bool isVirtual() const { return mIsVirtual; }
     bool isPrimary() const { return mIsPrimary; }
+    void setDisplayFlags(uint32_t flags) { mDisplayFlags = flags; }
+    uint32_t getDisplayFlags() const { return mDisplayFlags; }
+    bool usesPicoSingleLayer() const { return (mDisplayFlags & DisplayState::ePicoSingleLayer) != 0; }
 
     // isSecure indicates whether this display can be trusted to display
     // secure surfaces.
@@ -224,6 +227,7 @@ private:
     // For animation hint
     bool mIsAnimating;
     bool mIsDisplayBuiltInType;
+    uint32_t mDisplayFlags = 0;
 };
 
 struct DisplayDeviceState {
@@ -240,6 +244,7 @@ struct DisplayDeviceState {
     uint32_t height = 0;
     std::string displayName;
     bool isSecure = false;
+    uint32_t flags = 0;
 
 private:
     static std::atomic<int32_t> sNextSequenceId;
@@ -268,6 +273,7 @@ struct DisplayDeviceCreationArgs {
     std::unordered_map<ui::ColorMode, std::vector<ui::RenderIntent>> hwcColorModes;
     int initialPowerMode{HWC_POWER_MODE_NORMAL};
     bool isPrimary{false};
+    uint32_t flags{0};
 };
 
 class DisplayRenderArea : public RenderArea {

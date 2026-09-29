@@ -91,6 +91,7 @@
 #include "RefreshRateOverlay.h"
 #include "StartPropertySetThread.h"
 #include "SurfaceFlinger.h"
+#include "PicoSingleLayerComposition.h"
 #include "SurfaceInterceptor.h"
 
 #include "DisplayHardware/ComposerHal.h"
@@ -136,6 +137,8 @@
 composer::ComposerExtnLib composer::ComposerExtnLib::g_composer_ext_lib_;
 
 namespace android {
+
+const bool SurfaceFlinger::sPicoSkipSingleLayer = property_get_bool("persist.sys.skip_single_layer", true);
 
 using namespace android::hardware::configstore;
 using namespace android::hardware::configstore::V1_0;
@@ -3267,6 +3270,7 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
     creationArgs.sequenceId = state.sequenceId;
     creationArgs.isVirtual = state.isVirtual();
     creationArgs.isSecure = state.isSecure;
+    creationArgs.flags = state.flags;
     creationArgs.displaySurface = dispSurface;
     creationArgs.hasWideColorGamut = false;
     creationArgs.supportedPerFrameMetadata = 0;
@@ -3438,6 +3442,9 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                             display->setProjection(state.orientation, state.viewport, state.frame);
                         }
                     }
+                    if (state.flags != draw[i].flags) {
+                        display->setDisplayFlags(state.flags);
+                    }
                     if (state.width != draw[i].width || state.height != draw[i].height) {
                         if (!displaySizeChanged) {
                             display->setDisplaySize(state.width, state.height);
@@ -3499,7 +3506,8 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                                 new VirtualDisplaySurface(getHwComposer(), displayId, state.surface,
                                                           bqProducer, bqConsumer,
                                                           state.displayName, state.isSecure,
-                                                          false /* useTwoSinkBuffers */);
+                                                          (state.flags & DisplayState::ePicoSingleLayer) &&
+                                                                  !(sPicoSkipSingleLayer && mPicoSingleLayerFallback));
 
                         dispSurface = vds;
                         producer = vds;
@@ -4136,6 +4144,7 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
     renderengine::DisplaySettings clientCompositionDisplay;
     std::vector<renderengine::LayerSettings> clientCompositionLayers;
     sp<GraphicBuffer> buf;
+    sp<Layer> singleLayerOwner;
     base::unique_fd fd;
 
     if (hasClientComposition) {
@@ -4148,15 +4157,6 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
         if (needsProtectedContext != display->getRenderSurface()->isProtected() &&
             needsProtectedContext == renderEngine.isProtected()) {
             display->getRenderSurface()->setProtected(needsProtectedContext);
-        }
-
-        buf = display->getRenderSurface()->dequeueBuffer(&fd);
-
-        if (buf == nullptr) {
-            ALOGW("Dequeuing buffer for display [%s] failed, bailing out of "
-                  "client composition for this frame",
-                  displayDevice->getDisplayName().c_str());
-            return false;
         }
 
         clientCompositionDisplay.physicalDisplay = displayState.scissor;
@@ -4244,6 +4244,7 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
                                                       renderEngine.isProtected(), layerSettings);
                     if (prepared) {
                         clientCompositionLayers.push_back(layerSettings);
+                        singleLayerOwner = layer;
                     }
                     break;
                 }
@@ -4286,9 +4287,27 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
                 clientCompositionLayers.push_back(layerSettings);
             }
         }
+        auto& renderSurface = *display->getRenderSurface();
+        const auto action = preparePicoSingleLayerComposition(
+                renderSurface, sPicoSkipSingleLayer && displayDevice->usesPicoSingleLayer(),
+                mPicoSingleLayerFallback, clientCompositionLayers, singleLayerOwner, readyFence);
+        if (action == PicoSingleLayerAction::Attached) return true;
+        if (action == PicoSingleLayerAction::SkipFrame) return false;
+        if (action == PicoSingleLayerAction::Render && displayDevice->isVirtual()) {
+            renderSurface.setMultiLayerFlag(clientCompositionLayers.size() != 1);
+        }
+        buf = renderSurface.dequeueBuffer(&fd);
+        if (!buf) {
+            ALOGW("Dequeuing buffer for display [%s] failed", displayDevice->getDisplayName().c_str());
+            return false;
+        }
         renderEngine.drawLayers(clientCompositionDisplay, clientCompositionLayers,
                                 buf->getNativeBuffer(), /*useFramebufferCache=*/true, std::move(fd),
                                 readyFence);
+        if (action == PicoSingleLayerAction::RenderAndTrack) {
+            finishPicoSingleLayerRender(renderSurface, singleLayerOwner, buf,
+                                       clientCompositionLayers.front().source.buffer.fence, readyFence);
+        }
     } else if (displayId) {
         mPowerAdvisor.setExpensiveRenderingExpected(*displayId, false);
     }
@@ -4711,6 +4730,10 @@ uint32_t SurfaceFlinger::setDisplayStateLocked(const DisplayState& s) {
         }
     }
 
+    if ((what & DisplayState::eDisplayFlagsChanged) && state.flags != s.flags) {
+        state.flags = s.flags;
+        flags |= eDisplayTransactionNeeded;
+    }
     return flags;
 }
 
