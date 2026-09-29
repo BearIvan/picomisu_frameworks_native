@@ -247,3 +247,13 @@ cc_test {
     srcs: ["PicoDisplayFlags_probe.cpp"],
     shared_libs: ["libgui", "libbinder", "libui", "libutils"],
 }
+
+cc_test {
+    name: "picomisu_surface_client_probe",
+    gtest: false,
+    compile_multilib: "both",
+    ldflags: ["-Wl,--export-dynamic"],
+    cflags: ["-Wall", "-Werror"],
+    srcs: ["PicoSurfaceClient_probe.cpp"],
+    shared_libs: ["libgui", "libbinder", "libutils"],
+}

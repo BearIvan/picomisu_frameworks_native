@@ -367,6 +367,15 @@ pid_t IPCThreadState::getCallingPid() const
     return mCallingPid;
 }
 
+pid_t IPCThreadState::getCallingTid()
+{
+    int32_t caller = 0;
+    constexpr unsigned long getCallingTidRequest = _IOR('b', 31, int32_t);
+    static_assert(getCallingTidRequest == 0x8004621fUL);
+    if (ioctl(mProcess->mDriverFD, getCallingTidRequest, &caller) < 0) return -1;
+    return caller;
+}
+
 pid_t IPCThreadState::getLastFrozenPid() const {
     return mLastFrozenPid;
 }

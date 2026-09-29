@@ -42,6 +42,8 @@ public:
             status_t            clearLastError();
 
             pid_t               getCallingPid() const;
+            // PICO kernel query; returns -1 if the driver rejects the request.
+            pid_t               getCallingTid();
             pid_t               getLastFrozenPid() const;
             // nullptr if unavailable
             //
