@@ -178,3 +178,23 @@ cc_test {
     srcs: ["PicoFreezeWire_probe.cpp"],
     shared_libs: ["libbinder", "libutils", "liblog"],
 }
+
+cc_test {
+    name: "picomisu_freeze_registry_probe",
+    gtest: false,
+    compile_multilib: "both",
+    ldflags: ["-Wl,--export-dynamic"],
+    cflags: ["-Wall", "-Werror"],
+    srcs: ["PicoFreezeRegistry_probe.cpp"],
+    shared_libs: ["libbinder", "libutils", "liblog"],
+}
+
+cc_test {
+    name: "picomisu_freeze_registry_test",
+    compile_multilib: "both",
+    ldflags: ["-Wl,--export-dynamic"],
+    sanitize: { address: true },
+    cflags: ["-Wall", "-Werror"],
+    srcs: ["PicoFreezeRegistry_test.cpp", ":picomisu_freeze_manager_sources"],
+    shared_libs: ["libbinder", "libutils", "liblog"],
+}

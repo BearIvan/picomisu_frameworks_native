@@ -51,6 +51,7 @@ cc_library_shared {
         "IBatteryStats.cpp",
         "IInterface.cpp",
         "IFreezeManager.cpp",
+        "FreezeManager.cpp",
         "IUnFreezeCallback.cpp",
         "IMediaResourceMonitor.cpp",
         "IMemory.cpp",
@@ -148,3 +149,9 @@ filegroup {
 }
 
 subdirs = ["tests"]
+
+// Instrument the actual registry implementation in focused lifetime tests.
+filegroup {
+    name: "picomisu_freeze_manager_sources",
+    srcs: ["FreezeManager.cpp"],
+}
