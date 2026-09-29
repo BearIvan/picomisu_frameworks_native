@@ -16,6 +16,7 @@
 
 #define LOG_TAG "IPCThreadState"
 
+#include <private/binder/PicoFreeze.h>
 #include <binder/IPCThreadState.h>
 #include <binderthreadstate/IPCThreadStateBase.h>
 
@@ -365,6 +366,11 @@ pid_t IPCThreadState::getCallingPid() const
 {
     return mCallingPid;
 }
+
+pid_t IPCThreadState::getLastFrozenPid() const {
+    return mLastFrozenPid;
+}
+
 
 const char* IPCThreadState::getCallingSid() const
 {
@@ -805,7 +811,8 @@ IPCThreadState::IPCThreadState()
       mPropagateWorkSource(false),
       mStrictModePolicy(0),
       mLastTransactionBinderFlags(0),
-      mCallRestriction(mProcess->mCallRestriction)
+      mCallRestriction(mProcess->mCallRestriction),
+      mLastFrozenPid(0)
 {
     pthread_setspecific(gTLS, this);
     clearCaller();
@@ -857,6 +864,13 @@ status_t IPCThreadState::waitForResponse(Parcel *reply, status_t *acquireResult)
 
         case BR_FAILED_REPLY:
             err = FAILED_TRANSACTION;
+            goto finish;
+
+        // PICO Android 10 adds an int32 PID after this otherwise size-zero
+        // Binder command. It is not the later generic Android frozen reply.
+        case PICO_BR_FROZEN_REPLY:
+            mLastFrozenPid = mIn.readInt32();
+            err = PICO_FROZEN_TRANSACTION;
             goto finish;
 
         case BR_ACQUIRE_RESULT:

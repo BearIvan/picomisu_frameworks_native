@@ -198,3 +198,13 @@ cc_test {
     srcs: ["PicoFreezeRegistry_test.cpp", ":picomisu_freeze_manager_sources"],
     shared_libs: ["libbinder", "libutils", "liblog"],
 }
+
+cc_test {
+    name: "picomisu_frozen_reply_probe",
+    gtest: false,
+    compile_multilib: "both",
+    ldflags: ["-Wl,--export-dynamic"],
+    cflags: ["-Wall", "-Werror"],
+    srcs: ["PicoFrozenReply_probe.cpp"],
+    shared_libs: ["libbinder", "libutils", "liblog"],
+}

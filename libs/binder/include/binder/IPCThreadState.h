@@ -42,6 +42,7 @@ public:
             status_t            clearLastError();
 
             pid_t               getCallingPid() const;
+            pid_t               getLastFrozenPid() const;
             // nullptr if unavailable
             //
             // this can't be restored once it's cleared, and it does not return the
@@ -192,6 +193,7 @@ private:
             IPCThreadStateBase  *mIPCThreadStateBase;
 
             ProcessState::CallRestriction mCallRestriction;
+            pid_t               mLastFrozenPid;
 };
 
 }; // namespace android
