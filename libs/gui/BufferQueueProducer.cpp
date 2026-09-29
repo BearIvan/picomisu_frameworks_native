@@ -107,6 +107,20 @@ status_t BufferQueueProducer::setMaxDequeuedBufferCount(
     sp<IConsumerListener> listener;
     { // Autolock scope
         std::unique_lock<std::mutex> lock(mCore->mMutex);
+        if (maxDequeuedBuffers == -2 && mConsumerIsSurfaceFlinger) {
+            mPicoSingleLayerDequeues = true;
+            return NO_ERROR;
+        }
+        // Match PICO's 32-bit count arithmetic, including the private consumer
+        // allowance. It uses this marker before the normal quota validation.
+        uint32_t adjusted = static_cast<uint32_t>(maxDequeuedBuffers) +
+                static_cast<uint32_t>(mPicoSingleLayerDequeues);
+        if (mCore->mHasPicoConsumer) {
+            adjusted += 2;
+            maxDequeuedBuffers = std::max(1, static_cast<int32_t>(adjusted));
+        } else {
+            maxDequeuedBuffers = static_cast<int32_t>(adjusted);
+        }
         mCore->waitWhileAllocatingLocked(lock);
 
         if (mCore->mIsAbandoned) {

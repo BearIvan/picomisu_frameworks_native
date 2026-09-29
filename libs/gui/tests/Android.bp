@@ -228,3 +228,13 @@ cc_test {
     srcs: ["PicoProducerFreeze_probe.cpp"],
     shared_libs: ["libgui", "libbinder", "libui", "libutils", "liblog"],
 }
+
+cc_test {
+    name: "picomisu_dequeue_count_probe",
+    gtest: false,
+    compile_multilib: "both",
+    ldflags: ["-Wl,--export-dynamic"],
+    cflags: ["-Wall", "-Werror"],
+    srcs: ["PicoDequeueCount_probe.cpp"],
+    shared_libs: ["libgui", "libbinder", "libutils", "liblog"],
+}

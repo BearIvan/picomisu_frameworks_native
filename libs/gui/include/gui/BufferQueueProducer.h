@@ -281,6 +281,10 @@ private:
     // Callback owns only this flag; it never touches a possibly dying producer.
     std::shared_ptr<std::atomic<bool>> mPicoUnfreezePending =
             std::make_shared<std::atomic<bool>>(false);
+
+    // PICO's -2 command adds one dequeue slot for a SurfaceFlinger producer.
+    // Protected by mCore->mMutex; this is independent of fence-ready mode.
+    bool mPicoSingleLayerDequeues = false;
 }; // class BufferQueueProducer
 
 } // namespace android
