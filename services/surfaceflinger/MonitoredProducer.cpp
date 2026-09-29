@@ -60,14 +60,21 @@ status_t MonitoredProducer::dequeueBuffer(int* slot, sp<Fence>* fence, uint32_t 
                                           PixelFormat format, uint64_t usage,
                                           uint64_t* outBufferAge,
                                           FrameEventHistoryDelta* outTimestamps) {
-    nsecs_t dequeueStartTime = systemTime();
-    status_t result = mProducer->dequeueBuffer(slot, fence, w, h, format, usage, outBufferAge, outTimestamps);
-    if (result == OK) {
-        sp<Layer> layer = mLayer.promote();
-        if (layer != nullptr) {
-            layer->setDequeueLatency(systemTime() - dequeueStartTime);
+    mPicoMonitor.setFrameItem(MonitorIndex::Begin);
+    mPicoClient.setFrameItem(0);
+    const nsecs_t start = systemTime(SYSTEM_TIME_MONOTONIC);
+    const status_t result = mProducer->dequeueBuffer(slot, fence, w, h, format, usage,
+                                                    outBufferAge, outTimestamps);
+    if (result == NO_ERROR) {
+        if (const sp<Layer> layer = mLayer.promote()) {
+            const nsecs_t duration = systemTime(SYSTEM_TIME_MONOTONIC) - start;
+            // CAF SmoMo latency and PICO dequeue duration measure the same call.
+            layer->setDequeueLatency(duration);
+            layer->setPicoDequeueDuration(duration);
         }
     }
+    mPicoMonitor.setFrameItem(MonitorIndex::End);
+    mPicoClient.setFrameItem(1);
     return result;
 }
 
@@ -87,7 +94,16 @@ status_t MonitoredProducer::attachBuffer(int* outSlot,
 
 status_t MonitoredProducer::queueBuffer(int slot, const QueueBufferInput& input,
         QueueBufferOutput* output) {
-    return mProducer->queueBuffer(slot, input, output);
+    mPicoMonitor.setFrameItem(MonitorIndex::RenderBegin);
+    mPicoClient.setFrameItem(2);
+    const status_t result = mProducer->queueBuffer(slot, input, output);
+    mPicoMonitor.setFrameItem(MonitorIndex::RenderEnd);
+    mPicoClient.setFrameItem(3);
+    if (const sp<Layer> layer = mLayer.promote()) {
+        mPicoMonitor.addFrame(layer->getName());
+        mPicoClient.addFrame(layer->getName(), slot);
+    }
+    return result;
 }
 
 status_t MonitoredProducer::cancelBuffer(int slot, const sp<Fence>& fence) {
@@ -168,6 +184,23 @@ IBinder* MonitoredProducer::onAsBinder() {
 
 sp<Layer> MonitoredProducer::getLayer() const {
     return mLayer.promote();
+}
+
+SurfaceClient* MonitoredProducer::getSurfaceClient() {
+    return &mPicoClient;
+}
+
+status_t MonitoredProducer::onTransact(uint32_t code, const Parcel& data,
+                                      Parcel* reply, uint32_t flags) {
+    const status_t result = BnGraphicBufferProducer::onTransact(code, data, reply, flags);
+    if (result != PERMISSION_DENIED && result != UNKNOWN_TRANSACTION) return result;
+    if (!data.checkInterface(this)) return PERMISSION_DENIED;
+    if (code != 1110) return result;
+    const int index = data.readInt32();
+    if (const sp<Layer> layer = mLayer.promote()) {
+        mPicoMonitor.updateCurrentDisplayFps(index, layer->getName());
+    }
+    return NO_ERROR;
 }
 
 // ---------------------------------------------------------------------------

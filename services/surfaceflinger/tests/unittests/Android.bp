@@ -15,6 +15,7 @@
 cc_test {
     name: "libsurfaceflinger_unittest",
     defaults: ["libsurfaceflinger_defaults"],
+    ldflags: ["-Wl,--export-dynamic"],
     test_suites: ["device-tests"],
     sanitize: {
         // Using the address sanitizer not only helps uncover issues in the code
@@ -43,6 +44,7 @@ cc_test {
         "DisplayIdentificationTest.cpp",
         "DisplayTransactionTest.cpp",
         "PicoSingleLayerCompositionTest.cpp",
+        "PicoMonitoredProducerTest.cpp",
         "EventControlThreadTest.cpp",
         "EventThreadTest.cpp",
         "IdleTimerTest.cpp",

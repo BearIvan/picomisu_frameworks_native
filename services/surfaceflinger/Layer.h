@@ -832,6 +832,12 @@ public:
     // this to be called once.
     sp<IBinder> getHandle();
     const String8& getName() const;
+    void setPicoDequeueDuration(nsecs_t duration) {
+        mPicoDequeueDuration.store(duration, std::memory_order_release);
+    }
+    nsecs_t getPicoDequeueDuration() const {
+        return mPicoDequeueDuration.load(std::memory_order_acquire);
+    }
     virtual void notifyAvailableFrames() {}
     virtual PixelFormat getPixelFormat() const { return PIXEL_FORMAT_NONE; }
     bool getPremultipledAlpha() const;
@@ -891,6 +897,7 @@ protected:
     // We encode unset as -1.
     int32_t mOverrideScalingMode{-1};
     std::atomic<uint64_t> mCurrentFrameNumber{0};
+    std::atomic<nsecs_t> mPicoDequeueDuration{0};
     bool mFrameLatencyNeeded{false};
     // Whether filtering is needed b/c of the drawingstate
     bool mNeedsFiltering{false};

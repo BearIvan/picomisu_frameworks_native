@@ -18,6 +18,8 @@
 #define ANDROID_MONITORED_PRODUCER_H
 
 #include <gui/IGraphicBufferProducer.h>
+#include <gui/SurfaceClient.h>
+#include <gui/SurfaceMonitor.h>
 
 namespace android {
 
@@ -73,12 +75,16 @@ public:
 
     // The Layer which created this producer, and on which queued Buffer's will be displayed.
     sp<Layer> getLayer() const;
+    SurfaceClient* getSurfaceClient();
+    status_t onTransact(uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags) override;
 
 private:
     sp<IGraphicBufferProducer> mProducer;
     sp<SurfaceFlinger> mFlinger;
     // The Layer which created this producer, and on which queued Buffer's will be displayed.
     wp<Layer> mLayer;
+    SurfaceMonitor mPicoMonitor;
+    SurfaceClient mPicoClient;
 };
 
 }; // namespace android

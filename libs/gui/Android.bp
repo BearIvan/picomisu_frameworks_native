@@ -45,6 +45,7 @@ cc_defaults {
         "StreamSplitter.cpp",
         "Surface.cpp",
         "SurfaceClient.cpp",
+        "SurfaceMonitor.cpp",
         "SurfaceControl.cpp",
         "SurfaceComposerClient.cpp",
         "SyncFeatures.cpp",
