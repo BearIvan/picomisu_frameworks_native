@@ -169,3 +169,12 @@ cc_test {
     srcs: ["PicoCachedBuffer_probe.cpp"],
     shared_libs: ["libbinder", "libgui", "libui", "libutils", "liblog"],
 }
+
+cc_test {
+    name: "picomisu_freeze_wire_probe",
+    gtest: false,
+    compile_multilib: "both",
+    cflags: ["-Wall", "-Werror"],
+    srcs: ["PicoFreezeWire_probe.cpp"],
+    shared_libs: ["libbinder", "libutils", "liblog"],
+}

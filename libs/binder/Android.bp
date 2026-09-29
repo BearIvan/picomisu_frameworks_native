@@ -50,6 +50,8 @@ cc_library_shared {
         "IAppOpsService.cpp",
         "IBatteryStats.cpp",
         "IInterface.cpp",
+        "IFreezeManager.cpp",
+        "IUnFreezeCallback.cpp",
         "IMediaResourceMonitor.cpp",
         "IMemory.cpp",
         "IPCThreadState.cpp",
