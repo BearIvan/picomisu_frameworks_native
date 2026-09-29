@@ -30,6 +30,7 @@
 #define EGL_EGLEXT_PROTOTYPES
 
 #include <binder/IPCThreadState.h>
+#include <binder/FreezeManager.h>
 #include <gui/BufferItem.h>
 #include <gui/BufferQueueCore.h>
 #include <gui/BufferQueueProducer.h>
@@ -63,7 +64,9 @@ BufferQueueProducer::BufferQueueProducer(const sp<BufferQueueCore>& core,
     mDequeueTimeout(-1),
     mDequeueWaitingForAllocation(false) {}
 
-BufferQueueProducer::~BufferQueueProducer() {}
+BufferQueueProducer::~BufferQueueProducer() {
+    FreezeManager::getInstance()->unRegisterSelfUnFreezeListener(this);
+}
 
 status_t BufferQueueProducer::requestBuffer(int slot, sp<GraphicBuffer>* buf) {
     ATRACE_CALL();
@@ -284,13 +287,26 @@ status_t BufferQueueProducer::waitForFreeSlotThenRelock(FreeSlotCaller caller,
         // This check is only done if a buffer has already been queued
         if (mCore->mBufferHasBeenQueued &&
                 dequeuedCount >= mCore->mMaxDequeuedBufferCount) {
-            // Supress error logs when timeout is non-negative.
-            if (mDequeueTimeout < 0) {
-                BQ_LOGE("%s: attempting to exceed the max dequeued buffer "
-                        "count (%d)", callerString,
-                        mCore->mMaxDequeuedBufferCount);
+            if (!mPicoUnfreezePending->exchange(false, std::memory_order_relaxed)) {
+                // Suppress error logs when timeout is non-negative.
+                if (mDequeueTimeout < 0) {
+                    BQ_LOGE("%s: attempting to exceed the max dequeued buffer "
+                            "count (%d)", callerString, mCore->mMaxDequeuedBufferCount);
+                }
+                return INVALID_OPERATION;
             }
-            return INVALID_OPERATION;
+            // PICO cancels the last producer-owned active slot after unfreeze.
+            // Consumer-only slots are excluded by the dequeue-count predicate.
+            int recovered = BufferQueueCore::INVALID_BUFFER_SLOT;
+            for (int slot : mCore->mActiveBuffers) {
+                if (mSlots[slot].mBufferState.isDequeued()) recovered = slot;
+            }
+            if (recovered != BufferQueueCore::INVALID_BUFFER_SLOT) {
+                mSlots[recovered].mBufferState.cancel();
+                mCore->mActiveBuffers.erase(recovered);
+                mCore->mFreeBuffers.push_back(recovered);
+                mSlots[recovered].mFence = Fence::NO_FENCE;
+            }
         }
 
         *found = BufferQueueCore::INVALID_BUFFER_SLOT;
@@ -1170,6 +1186,7 @@ status_t BufferQueueProducer::queueBuffer(int slot,
         lastQueuedFence->waitForever("Throttling EGL Production");
     }
 
+    mPicoUnfreezePending->store(false, std::memory_order_relaxed);
     return NO_ERROR;
 }
 
@@ -1752,6 +1769,16 @@ status_t BufferQueueProducer::getConsumerUsage(uint64_t* outUsage) const {
     std::lock_guard<std::mutex> lock(mCore->mMutex);
     *outUsage = mCore->mConsumerUsageBits;
     return NO_ERROR;
+}
+
+void BufferQueueProducer::listenFreezeSelf() {
+    const auto pending = mPicoUnfreezePending;
+    FreezeManager* manager = FreezeManager::getInstance();
+    if (manager) {
+        manager->registerSelfUnFreezeListener(this,
+                [pending](const void*) { pending->store(true, std::memory_order_relaxed); },
+                nullptr, false);
+    }
 }
 
 } // namespace android

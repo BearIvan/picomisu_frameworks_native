@@ -17,7 +17,9 @@
 #ifndef ANDROID_GUI_BUFFERQUEUEPRODUCER_H
 #define ANDROID_GUI_BUFFERQUEUEPRODUCER_H
 
+#include <atomic>
 #include <map>
+#include <memory>
 #include <gui/BufferQueueDefs.h>
 #include <gui/IGraphicBufferProducer.h>
 
@@ -192,6 +194,7 @@ public:
 
     // See IGraphicBufferProducer::getConsumerUsage
     virtual status_t getConsumerUsage(uint64_t* outUsage) const override;
+    void listenFreezeSelf() override;
 
 private:
     friend class PicoConsumerFenceTest;
@@ -275,6 +278,9 @@ private:
     bool mPicoFenceReadyMode = false;
     // Protected by the queue mutex. PICO retains at most five recent buffers.
     std::map<uint64_t, std::pair<sp<GraphicBuffer>, uint64_t>> mBufferCache;
+    // Callback owns only this flag; it never touches a possibly dying producer.
+    std::shared_ptr<std::atomic<bool>> mPicoUnfreezePending =
+            std::make_shared<std::atomic<bool>>(false);
 }; // class BufferQueueProducer
 
 } // namespace android

@@ -208,3 +208,23 @@ cc_test {
     srcs: ["PicoFrozenReply_probe.cpp"],
     shared_libs: ["libbinder", "libutils", "liblog"],
 }
+
+cc_test {
+    name: "picomisu_freeze_remote_probe",
+    gtest: false,
+    compile_multilib: "both",
+    ldflags: ["-Wl,--export-dynamic"],
+    cflags: ["-Wall", "-Werror"],
+    srcs: ["PicoFreezeRemote_probe.cpp"],
+    shared_libs: ["libbinder", "libutils", "liblog", "libdl"],
+}
+
+cc_test {
+    name: "picomisu_producer_freeze_probe",
+    gtest: false,
+    compile_multilib: "both",
+    ldflags: ["-Wl,--export-dynamic"],
+    cflags: ["-Wall", "-Werror"],
+    srcs: ["PicoProducerFreeze_probe.cpp"],
+    shared_libs: ["libgui", "libbinder", "libui", "libutils", "liblog"],
+}
