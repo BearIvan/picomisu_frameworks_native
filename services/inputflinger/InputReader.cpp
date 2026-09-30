@@ -2230,6 +2230,12 @@ void KeyboardInputMapper::dump(std::string& dump) {
 
 void KeyboardInputMapper::configure(nsecs_t when,
         const InputReaderConfiguration* config, uint32_t changes) {
+    // PICO: keep the configuration so process() can re-resolve the viewport when the
+    // virtual input device switches display. process() passes &mConfig back in.
+    if (config != &mConfig) {
+        mConfig = *config;
+    }
+
     InputMapper::configure(when, config, changes);
 
     if (!changes) { // first time only
@@ -2294,6 +2300,28 @@ void KeyboardInputMapper::reset(nsecs_t when) {
 }
 
 void KeyboardInputMapper::process(const RawEvent* rawEvent) {
+    // PICO: per-event display and device routing for XRShell's virtual input device.
+    if (rawEvent->type == EV_MSC) {
+        if (rawEvent->code == MSC_SERIAL) {
+            ALOGI("KeyboardInputMapper::process-->change displayId from %d to %d, "
+                    "currentViewPort display:%d, device: %s",
+                    mDisplayIdOverride, rawEvent->value,
+                    mViewport ? mViewport->displayId : ADISPLAY_ID_NONE,
+                    getDeviceName().c_str());
+            mDisplayIdOverride = rawEvent->value;
+            const int32_t currentDisplayId = mViewport ? mViewport->displayId : ADISPLAY_ID_NONE;
+            if (currentDisplayId != mDisplayIdOverride) {
+                configure(systemTime(SYSTEM_TIME_MONOTONIC), &mConfig,
+                        InputReaderConfiguration::CHANGE_DISPLAY_INFO);
+                mViewport = mConfig.getDisplayViewportByDisplayId(mDisplayIdOverride);
+            }
+        } else if (rawEvent->code == MSC_PULSELED) {
+            ALOGI("KeyboardInputMapper::process-->change deviceId from %d to %d, device: %s",
+                    mDeviceIdOverride, rawEvent->value, getDeviceName().c_str());
+            mDeviceIdOverride = rawEvent->value;
+        }
+    }
+
     switch (rawEvent->type) {
     case EV_KEY: {
         int32_t scanCode = rawEvent->code;
@@ -2436,7 +2464,9 @@ void KeyboardInputMapper::processKey(nsecs_t when, bool down, int32_t scanCode,
         policyFlags |= POLICY_FLAG_DISABLE_KEY_REPEAT;
     }
 
-    NotifyKeyArgs args(mContext->getNextSequenceNum(), when, getDeviceId(), mSource,
+    // PICO: report the device id the virtual input device asked for (MSC_PULSELED).
+    const int32_t deviceId = mDeviceIdOverride == -1 ? getDeviceId() : mDeviceIdOverride;
+    NotifyKeyArgs args(mContext->getNextSequenceNum(), when, deviceId, mSource,
             getDisplayId(), policyFlags, down ? AKEY_EVENT_ACTION_DOWN : AKEY_EVENT_ACTION_UP,
             AKEY_EVENT_FLAG_FROM_SYSTEM, keyCode, scanCode, keyMetaState, downTime);
     getListener()->notifyKey(&args);
@@ -3457,6 +3487,20 @@ bool TouchInputMapper::hasExternalStylus() const {
  */
 std::optional<DisplayViewport> TouchInputMapper::findViewport() {
     if (mParameters.hasAssociatedDisplay) {
+        // PICO: the virtual input device selected a display with MSC_SERIAL. Use its
+        // viewport if the display has one, otherwise fall back to the normal lookup.
+        if (mDisplayIdOverride != -1) {
+            std::optional<DisplayViewport> v =
+                    mConfig.getDisplayViewportByDisplayId(mDisplayIdOverride);
+            if (v) {
+                ALOGI("findViewport, displayId: %d, device: %s", mDisplayIdOverride,
+                        getDeviceName().c_str());
+                return v;
+            }
+            ALOGE("findViewport error, displayId: %d, device: %s", mDisplayIdOverride,
+                    getDeviceName().c_str());
+        }
+
         const std::optional<uint8_t> displayPort = mDevice->getAssociatedDisplayPort();
         if (displayPort) {
             // Find the viewport that contains the same port
@@ -3626,6 +3670,17 @@ void TouchInputMapper::configureSurface(nsecs_t when, bool* outResetNeeded) {
 
             mSurfaceOrientation = mParameters.orientationAware ?
                     mViewport.orientation : DISPLAY_ORIENTATION_0;
+
+            // PICO: XRShell reports virtual_input_device coordinates in pixels of the target
+            // display, so the raw range follows the surface of whichever display it selected.
+            if (getDeviceName().find(mVirtualInputDeviceName) == 0) {
+                ALOGI("change raw size, rawWidth:%d, rawHeight:%d, surfaceW:%d, surfaceH:%d "
+                        "for device:%s, displayId: %d",
+                        rawWidth, rawHeight, mSurfaceWidth, mSurfaceHeight,
+                        getDeviceName().c_str(), mViewport.displayId);
+                rawWidth = mSurfaceWidth;
+                rawHeight = mSurfaceHeight;
+            }
         } else {
             mPhysicalWidth = rawWidth;
             mPhysicalHeight = rawHeight;
@@ -4324,6 +4379,34 @@ void TouchInputMapper::process(const RawEvent* rawEvent) {
     mCursorButtonAccumulator.process(rawEvent);
     mCursorScrollAccumulator.process(rawEvent);
     mTouchButtonAccumulator.process(rawEvent);
+
+    // PICO: per-event display and device routing for XRShell's virtual input device.
+    if (rawEvent->type == EV_MSC) {
+        switch (rawEvent->code) {
+        case MSC_SERIAL:
+            ALOGI("TouchInputMapper::process-->change displayId from %d to %d, "
+                    "currentViewPort display:%d, device: %s",
+                    mDisplayIdOverride, rawEvent->value, mViewport.displayId,
+                    getDeviceName().c_str());
+            mDisplayIdOverride = rawEvent->value;
+            if (mViewport.displayId != mDisplayIdOverride) {
+                // findViewport() now resolves the viewport of mDisplayIdOverride.
+                bool resetNeeded = false;
+                configureSurface(systemTime(SYSTEM_TIME_MONOTONIC), &resetNeeded);
+            }
+            break;
+        case MSC_PULSELED:
+            ALOGI("TouchInputMapper::process-->change deviceId from %d to %d, device: %s",
+                    mDeviceIdOverride, rawEvent->value, getDeviceName().c_str());
+            mDeviceIdOverride = rawEvent->value;
+            break;
+        case MSC_GESTURE:
+            mCancelTouch = true;
+            ALOGI("TouchInputMapper::process-->cancel touch for devices: %s",
+                    getDeviceName().c_str());
+            break;
+        }
+    }
 
     if (rawEvent->type == EV_SYN && rawEvent->code == SYN_REPORT) {
         reportEventForStatistics(rawEvent->when);
@@ -6525,7 +6608,15 @@ void TouchInputMapper::dispatchMotion(nsecs_t when, uint32_t policyFlags, uint32
         if (action == AMOTION_EVENT_ACTION_POINTER_DOWN) {
             action = AMOTION_EVENT_ACTION_DOWN;
         } else if (action == AMOTION_EVENT_ACTION_POINTER_UP) {
-            action = AMOTION_EVENT_ACTION_UP;
+            // PICO: XRShell asked to cancel this gesture (MSC_GESTURE), e.g. because the
+            // pointer moved to another display. End it with CANCEL instead of UP, once.
+            if (mCancelTouch) {
+                ALOGI("use action_cancel instead of action_up");
+                mCancelTouch = false;
+                action = AMOTION_EVENT_ACTION_CANCEL;
+            } else {
+                action = AMOTION_EVENT_ACTION_UP;
+            }
         } else {
             // Can't happen.
             ALOG_ASSERT(false);
@@ -6536,7 +6627,9 @@ void TouchInputMapper::dispatchMotion(nsecs_t when, uint32_t policyFlags, uint32
     std::vector<TouchVideoFrame> frames = mDevice->getEventHub()->getVideoFrames(deviceId);
     std::for_each(frames.begin(), frames.end(),
             [this](TouchVideoFrame& frame) { frame.rotate(this->mSurfaceOrientation); });
-    NotifyMotionArgs args(mContext->getNextSequenceNum(), when, deviceId,
+    // PICO: report the device id the virtual input device asked for (MSC_PULSELED).
+    const int32_t reportedDeviceId = mDeviceIdOverride == -1 ? deviceId : mDeviceIdOverride;
+    NotifyMotionArgs args(mContext->getNextSequenceNum(), when, reportedDeviceId,
             source, displayId, policyFlags,
             action, actionButton, flags, metaState, buttonState, MotionClassification::NONE,
             edgeFlags, deviceTimestamp, pointerCount, pointerProperties, pointerCoords,

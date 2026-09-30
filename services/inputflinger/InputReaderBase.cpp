@@ -99,6 +99,18 @@ std::optional<DisplayViewport> InputReaderConfiguration::getDisplayViewportByPor
     return std::nullopt;
 }
 
+// PICO: XRShell's uinput device selects its target display per event (EV_MSC/MSC_SERIAL),
+// so the mappers look the viewport up by logical display id. First match wins.
+std::optional<DisplayViewport> InputReaderConfiguration::getDisplayViewportByDisplayId(
+        int32_t displayId) const {
+    for (const DisplayViewport& currentViewport : mDisplays) {
+        if (currentViewport.displayId == displayId) {
+            return std::make_optional(currentViewport);
+        }
+    }
+    return std::nullopt;
+}
+
 void InputReaderConfiguration::setDisplayViewports(const std::vector<DisplayViewport>& viewports) {
     mDisplays = viewports;
 }

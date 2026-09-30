@@ -274,6 +274,8 @@ struct InputReaderConfiguration {
     std::optional<DisplayViewport> getDisplayViewportByUniqueId(const std::string& uniqueDisplayId)
             const;
     std::optional<DisplayViewport> getDisplayViewportByPort(uint8_t physicalPort) const;
+    // PICO: viewport of a logical display, used for per-event display routing.
+    std::optional<DisplayViewport> getDisplayViewportByDisplayId(int32_t displayId) const;
     void setDisplayViewports(const std::vector<DisplayViewport>& viewports);
 
 

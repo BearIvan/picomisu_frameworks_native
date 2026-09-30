@@ -784,6 +784,16 @@ public:
         return std::nullopt;
     }
 protected:
+    // PICO: XRShell injects panel input through a uinput device named "virtual_input_device"
+    // and tags it with EV_MSC events: MSC_SERIAL carries the target display id, MSC_PULSELED
+    // the device id to report and MSC_GESTURE (touch only) turns the next final UP into a
+    // CANCEL. The overrides stay -1 until the device sends them. The member order matches the
+    // factory InputMapper (vptr, 0x8 device id, 0xc display id, 0x10 cancel, 0x18 name).
+    int32_t mDeviceIdOverride = -1;
+    int32_t mDisplayIdOverride = -1;
+    bool mCancelTouch = false;
+    std::string mVirtualInputDeviceName = "virtual_input_device";
+
     InputDevice* mDevice;
     InputReaderContext* mContext;
 
@@ -896,6 +906,10 @@ private:
         bool orientationAware;
         bool handlesKeyRepeat;
     } mParameters;
+
+    // PICO: copy of the last configuration, used to re-resolve mViewport when the virtual
+    // input device switches display (factory KeyboardInputMapper::configure/process).
+    InputReaderConfiguration mConfig;
 
     void configureParameters();
     void dumpParameters(std::string& dump);
