@@ -226,8 +226,10 @@ private:
         Dequeue,
         Attach,
     };
+    // PICO: outBufferReleased (dequeue only) is set when the autobuffercount logic freed an
+    // idle buffer; the caller then tells the consumer with onBuffersReleased().
     status_t waitForFreeSlotThenRelock(FreeSlotCaller caller, std::unique_lock<std::mutex>& lock,
-            int* found) const;
+            int* found, bool* outBufferReleased = nullptr) const;
 
     sp<BufferQueueCore> mCore;
 
@@ -285,6 +287,15 @@ private:
     // PICO's -2 command adds one dequeue slot for a SurfaceFlinger producer.
     // Protected by mCore->mMutex; this is independent of fence-ready mode.
     bool mPicoSingleLayerDequeues = false;
+
+    // PICO autobuffercount (factory BufferQueueProducer +0xe0/+0xe4/+0xe8): for a
+    // SurfaceFlinger consumer, free one idle buffer every mBufferReleaseFrame dequeues.
+    // persist.sys.autobuffercountenable (default true) and persist.sys.bufferelease.frame
+    // (default 50) are read when the producer is created. The counter is protected by
+    // mCore->mMutex.
+    bool mAutoBufferCountEnable;
+    int32_t mBufferReleaseFrame;
+    mutable int32_t mAutoBufferReleaseCounter = 0;
 }; // class BufferQueueProducer
 
 } // namespace android

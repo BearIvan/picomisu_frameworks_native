@@ -31,6 +31,7 @@
 
 #include <binder/IPCThreadState.h>
 #include <binder/FreezeManager.h>
+#include <cutils/properties.h>
 #include <gui/BufferItem.h>
 #include <gui/BufferQueueCore.h>
 #include <gui/BufferQueueProducer.h>
@@ -62,7 +63,9 @@ BufferQueueProducer::BufferQueueProducer(const sp<BufferQueueCore>& core,
     mCurrentCallbackTicket(0),
     mCallbackCondition(),
     mDequeueTimeout(-1),
-    mDequeueWaitingForAllocation(false) {}
+    mDequeueWaitingForAllocation(false),
+    mAutoBufferCountEnable(property_get_bool("persist.sys.autobuffercountenable", true)),
+    mBufferReleaseFrame(property_get_int32("persist.sys.bufferelease.frame", 50)) {}
 
 BufferQueueProducer::~BufferQueueProducer() {
     FreezeManager::getInstance()->unRegisterSelfUnFreezeListener(this);
@@ -275,7 +278,7 @@ int BufferQueueProducer::getFreeSlotLocked() const {
 }
 
 status_t BufferQueueProducer::waitForFreeSlotThenRelock(FreeSlotCaller caller,
-        std::unique_lock<std::mutex>& lock, int* found) const {
+        std::unique_lock<std::mutex>& lock, int* found, bool* outBufferReleased) const {
     auto callerString = (caller == FreeSlotCaller::Dequeue) ?
             "dequeueBuffer" : "attachBuffer";
     bool tryAgain = true;
@@ -367,6 +370,33 @@ status_t BufferQueueProducer::waitForFreeSlotThenRelock(FreeSlotCaller caller,
         // max buffer count to change.
         tryAgain = (*found == BufferQueueCore::INVALID_BUFFER_SLOT) ||
                    tooManyBuffers;
+
+        // PICO autobuffercount: a SurfaceFlinger consumer that did not ask for the extra
+        // single-layer dequeue slot gets one idle buffer freed every mBufferReleaseFrame
+        // dequeues while it holds at least three buffers, so the buffer count shrinks back
+        // after a burst.
+        if (mConsumerIsSurfaceFlinger && !mPicoSingleLayerDequeues &&
+                *found != BufferQueueCore::INVALID_BUFFER_SLOT && outBufferReleased != nullptr &&
+                mAutoBufferCountEnable) {
+            const size_t freeBuffers = mCore->mFreeBuffers.size();
+            if (freeBuffers >= 1 && freeBuffers + mCore->mActiveBuffers.size() >= 3) {
+                if (mAutoBufferReleaseCounter++ >= mBufferReleaseFrame) {
+                    const int slot = mCore->mFreeBuffers.front();
+                    if (mSlots[slot].mGraphicBuffer != nullptr) {
+                        mCore->clearBufferSlotLocked(slot);
+                        mCore->mFreeBuffers.pop_front();
+                        mCore->mFreeSlots.insert(slot);
+                        *outBufferReleased = true;
+                        BQ_LOGI("waitForFreeSlotThenRelock: release buffer callingpid = %d",
+                                IPCThreadState::self()->getCallingPid());
+                    }
+                    mAutoBufferReleaseCounter = 0;
+                }
+            } else if (freeBuffers == 0) {
+                mAutoBufferReleaseCounter = 0;
+            }
+        }
+
         if (tryAgain) {
             // Return an error if we're in non-blocking mode (producer and
             // consumer are controlled by the application).
@@ -424,6 +454,8 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
     EGLDisplay eglDisplay = EGL_NO_DISPLAY;
     EGLSyncKHR eglFence = EGL_NO_SYNC_KHR;
     bool attachedByConsumer = false;
+    // PICO: set when waitForFreeSlotThenRelock freed an idle buffer (autobuffercount).
+    bool bufferReleased = false;
 
     { // Autolock scope
         std::unique_lock<std::mutex> lock(mCore->mMutex);
@@ -452,7 +484,8 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
 
         int found = BufferItem::INVALID_BUFFER_SLOT;
         while (found == BufferItem::INVALID_BUFFER_SLOT) {
-            status_t status = waitForFreeSlotThenRelock(FreeSlotCaller::Dequeue, lock, &found);
+            status_t status = waitForFreeSlotThenRelock(FreeSlotCaller::Dequeue, lock, &found,
+                                                        &bufferReleased);
             if (status != NO_ERROR) {
                 return status;
             }
@@ -550,6 +583,18 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
         }
         waitForFenceReadyBufferLocked(found, outFence);
     } // Autolock scope
+
+    // PICO: let the consumer drop its reference to the buffer freed by autobuffercount.
+    if (bufferReleased) {
+        sp<IConsumerListener> listener;
+        {
+            std::lock_guard<std::mutex> lock(mCore->mMutex);
+            listener = mCore->mConsumerListener;
+        }
+        if (listener != nullptr) {
+            listener->onBuffersReleased();
+        }
+    }
 
     if (returnFlags & BUFFER_NEEDS_REALLOCATION) {
         BQ_LOGV("dequeueBuffer: allocating a new buffer for slot %d", *outSlot);
