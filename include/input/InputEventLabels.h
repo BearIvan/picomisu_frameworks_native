@@ -329,6 +329,15 @@ static const InputEventLabel KEYCODES[] = {
     DEFINE_KEYCODE(THUMBS_DOWN),
     DEFINE_KEYCODE(PROFILE_SWITCH),
 
+    // PICO VR keycodes, in the factory order. They are not contiguous with the AOSP codes,
+    // so KEYCODES[keyCode] only holds the label for keyCode <= AKEYCODE_PROFILE_SWITCH.
+    DEFINE_KEYCODE(LCONTROLLER_HOME),
+    DEFINE_KEYCODE(RCONTROLLER_HOME),
+    DEFINE_KEYCODE(DEFINE_CONFIRM),
+    DEFINE_KEYCODE(DEFINE_CONTROLLER_CONFIRM),
+    DEFINE_KEYCODE(DEFINE_DPINOUT),
+    DEFINE_KEYCODE(GESTURE_CALIBRATION),
+
     { nullptr, 0 }
 };
 
@@ -435,7 +444,11 @@ static inline int32_t getKeyCodeByLabel(const char* label) {
 }
 
 static inline const char* getLabelByKeyCode(int32_t keyCode) {
-    if (keyCode >= 0 && keyCode < static_cast<int32_t>(size(KEYCODES))) {
+    // The table is indexed by key code up to AKEYCODE_PROFILE_SWITCH. The PICO entries that
+    // follow have sparse values, so an index past the dense part must not return their
+    // labels (the factory returns nullptr for the PICO codes themselves, as here).
+    if (keyCode >= 0 && keyCode < static_cast<int32_t>(size(KEYCODES))
+            && KEYCODES[keyCode].value == keyCode) {
         return KEYCODES[keyCode].literal;
     }
     return nullptr;

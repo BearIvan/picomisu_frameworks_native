@@ -776,7 +776,22 @@ enum {
     AKEYCODE_THUMBS_DOWN = 287,
     /** Used to switch current account that is consuming content.
      * May be consumed by system to switch current viewer profile. */
-    AKEYCODE_PROFILE_SWITCH = 288
+    AKEYCODE_PROFILE_SWITCH = 288,
+
+    /* PICO VR keycodes. Values match the factory PICO OS libinput KEYCODES table; the
+     * factory key layouts (Generic.kl, gpio-keys.kl, dp_detect.kl) use these labels. */
+    /** Left controller home key. */
+    AKEYCODE_LCONTROLLER_HOME = 901,
+    /** Right controller home key. */
+    AKEYCODE_RCONTROLLER_HOME = 902,
+    /** Headset confirm key (also produced by the volume-up remap in EventHub). */
+    AKEYCODE_DEFINE_CONFIRM = 1001,
+    /** Controller confirm key. */
+    AKEYCODE_DEFINE_CONTROLLER_CONFIRM = 1002,
+    /** DisplayPort cable in/out (dp_detect key layout). */
+    AKEYCODE_DEFINE_DPINOUT = 1003,
+    /** Gesture calibration key. */
+    AKEYCODE_GESTURE_CALIBRATION = 1004
 
     // NOTE: If you add a new keycode here you must also add it to several other files.
     //       Refer to frameworks/base/core/java/android/view/KeyEvent.java for the full list.
