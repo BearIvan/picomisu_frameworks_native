@@ -46,10 +46,13 @@ SurfaceMonitor::SurfaceMonitor()
         property_get("ro.build.type", buildType, "user");
         if (ProcessState::self()->getDriverName() != String8("/dev/vndbinder") &&
                 ((monitor & 1) || std::memcmp(buildType, "userdebug", 10) == 0)) {
+            // The factory uses the blocking getService(); these PICO report services are not
+            // on the Source image, and getService() then waits about five seconds on every
+            // layer and Surface creation. checkService() returns immediately.
             const sp<IServiceManager> manager = defaultServiceManager();
-            if (manager) mTransfer = manager->getService(String16("transferserver"));
+            if (manager) mTransfer = manager->checkService(String16("transferserver"));
             const sp<IServiceManager> sysManager = defaultServiceManager();
-            if (sysManager) mSysTrans = sysManager->getService(String16("systransserver"));
+            if (sysManager) mSysTrans = sysManager->checkService(String16("systransserver"));
         } else {
             __android_log_print(ANDROID_LOG_DEBUG, nullptr, "SurfaceMonitor closed!");
         }
