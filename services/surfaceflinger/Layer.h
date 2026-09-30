@@ -838,6 +838,21 @@ public:
     nsecs_t getPicoDequeueDuration() const {
         return mPicoDequeueDuration.load(std::memory_order_acquire);
     }
+
+    // PICO: latch gating for the VR runtime's compositor surface ("PXRSurfaceControl#0",
+    // marked by SurfaceFlinger::createLayer; factory Layer +0x2d4a / +0x2d4c). In auto-refresh
+    // mode every queued frame (onFrameAvailable) resets the state to kPxrLatchPending; the
+    // next latch moves it to kPxrLatchHeld and further latches wait until a virtual display
+    // that shows the layer has been composed (kPxrLatchFree, also the initial state).
+    enum : int32_t { kPxrLatchPending = 0, kPxrLatchFree = 1, kPxrLatchHeld = 2 };
+    bool isPxrSurface() const { return mIsPxrSurface; }
+    void setPxrSurface(bool isPxrSurface) { mIsPxrSurface = isPxrSurface; }
+    int32_t getPxrLatchState() const { return mPxrLatchState.load(); }
+    void setPxrLatchState(int32_t state) { mPxrLatchState.store(state); }
+    // PICO: set on the main thread when an auto-refresh producer reconnects; lets
+    // BufferLayer::latchBuffer() latch once more while a refresh is pending (factory +0x2d50).
+    void setProducerReconnected(bool reconnected) { mProducerReconnected = reconnected; }
+
     virtual void notifyAvailableFrames() {}
     virtual PixelFormat getPixelFormat() const { return PIXEL_FORMAT_NONE; }
     bool getPremultipledAlpha() const;
@@ -898,6 +913,10 @@ protected:
     int32_t mOverrideScalingMode{-1};
     std::atomic<uint64_t> mCurrentFrameNumber{0};
     std::atomic<nsecs_t> mPicoDequeueDuration{0};
+    // PICO: see isPxrSurface() / setProducerReconnected().
+    bool mIsPxrSurface{false};
+    std::atomic<int32_t> mPxrLatchState{kPxrLatchFree};
+    bool mProducerReconnected{false};
     bool mFrameLatencyNeeded{false};
     // Whether filtering is needed b/c of the drawingstate
     bool mNeedsFiltering{false};

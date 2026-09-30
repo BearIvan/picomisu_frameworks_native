@@ -1117,6 +1117,12 @@ private:
     static const bool sPicoSkipSingleLayer;
     // PICO latches rendering fallback after marked buffers or an attach failure.
     bool mPicoSingleLayerFallback = false;
+    // PICO: the VR runtime's compositor layer, the last layer created with a name containing
+    // "PXRSurfaceControl#0" (factory SurfaceFlinger +0x2b78). Written by createLayer on a
+    // binder thread, read on the main thread, so it has its own lock.
+    std::mutex mPxrLayerMutex;
+    wp<Layer> mPxrLayer;
+    sp<Layer> getPxrLayer();
     bool mDebugDisableTransformHint = false;
     volatile nsecs_t mDebugInTransaction = 0;
     bool mForceFullDamage = false;

@@ -547,6 +547,10 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
 
             mFlinger->mFrameExtn->SetFrameInfo(frameInfo);
         }
+        // PICO: a new auto-refresh frame of the PXR surface may be latched once.
+        if (item.mAutoRefresh && mIsPxrSurface) {
+            mPxrLatchState.store(kPxrLatchPending);
+        }
         mFlinger->signalLayerUpdate();
     }
     mConsumer->onBufferAvailable(item);

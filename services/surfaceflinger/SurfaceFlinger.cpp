@@ -3415,6 +3415,13 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                     if (!display->isVirtual()) {
                         LOG_ALWAYS_FATAL_IF(!displayId);
                         dispatchDisplayHotplugEvent(displayId->value, false);
+                    } else if (display->hasPxrLayer()) {
+                        // PICO: the virtual display that released the PXR surface is gone;
+                        // re-arm the latch gate for the next queued frame.
+                        if (const sp<Layer> pxrLayer = getPxrLayer()) {
+                            pxrLayer->setPxrLatchState(Layer::kPxrLatchPending);
+                        }
+                        display->setHasPxrLayer(false);
                     }
                 }
 
@@ -4261,6 +4268,10 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
                     if (prepared) {
                         clientCompositionLayers.push_back(layerSettings);
                         singleLayerOwner = layer;
+                        // PICO: this display shows the VR runtime's compositor surface.
+                        if (layer->isPxrSurface()) {
+                            displayDevice->setHasPxrLayer(true);
+                        }
                     }
                     break;
                 }
@@ -4271,6 +4282,14 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
             ALOGV("  Skipping for empty clip");
         }
         firstLayer = false;
+    }
+
+    // PICO: a virtual display that shows the PXR surface has been composed, so the surface
+    // may latch again (see Layer::kPxrLatchHeld).
+    if (displayDevice->isVirtual() && displayDevice->hasPxrLayer()) {
+        if (const sp<Layer> pxrLayer = getPxrLayer()) {
+            pxrLayer->setPxrLatchState(Layer::kPxrLatchFree);
+        }
     }
 
     if (mSplitLayerExt && mLayerExt) {
@@ -5129,8 +5148,20 @@ status_t SurfaceFlinger::createLayer(const String8& name, const sp<Client>& clie
     }
     mInterceptor->saveSurfaceCreation(layer);
 
+    // PICO: remember the VR runtime's compositor surface (see Layer::isPxrSurface()).
+    if (uniqueName.find("PXRSurfaceControl#0") >= 0) {
+        layer->setPxrSurface(true);
+        std::lock_guard<std::mutex> lock(mPxrLayerMutex);
+        mPxrLayer = layer;
+    }
+
     setTransactionFlags(eTransactionNeeded);
     return result;
+}
+
+sp<Layer> SurfaceFlinger::getPxrLayer() {
+    std::lock_guard<std::mutex> lock(mPxrLayerMutex);
+    return mPxrLayer.promote();
 }
 
 String8 SurfaceFlinger::getUniqueLayerName(const String8& name)

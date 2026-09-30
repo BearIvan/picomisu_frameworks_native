@@ -416,6 +416,18 @@ bool BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime) 
         return false;
     }
 
+    // PICO: the PXR surface latches once per queued frame until a virtual display showing
+    // it has been composed (see Layer::kPxrLatchHeld).
+    if (mIsPxrSurface) {
+        int32_t state = mPxrLatchState.load();
+        if (state == kPxrLatchHeld) {
+            return false;
+        }
+        if (state == kPxrLatchPending) {
+            mPxrLatchState.compare_exchange_strong(state, kPxrLatchHeld);
+        }
+    }
+
     // if we've already called updateTexImage() without going through
     // a composition step, we have to skip this layer at this point
     // because we cannot call updateTeximage() without a corresponding

@@ -87,6 +87,10 @@ public:
     void setDisplayFlags(uint32_t flags) { mDisplayFlags = flags; }
     uint32_t getDisplayFlags() const { return mDisplayFlags; }
     bool usesPicoSingleLayer() const { return (mDisplayFlags & DisplayState::ePicoSingleLayer) != 0; }
+    // PICO: set once the VR runtime's PXR surface has been client-composed on this display
+    // (factory DisplayDevice +0x163d). Cleared when the display is removed.
+    bool hasPxrLayer() const { return mHasPxrLayer; }
+    void setHasPxrLayer(bool hasPxrLayer) { mHasPxrLayer = hasPxrLayer; }
 
     // isSecure indicates whether this display can be trusted to display
     // secure surfaces.
@@ -228,6 +232,7 @@ private:
     bool mIsAnimating;
     bool mIsDisplayBuiltInType;
     uint32_t mDisplayFlags = 0;
+    bool mHasPxrLayer = false;
 };
 
 struct DisplayDeviceState {
