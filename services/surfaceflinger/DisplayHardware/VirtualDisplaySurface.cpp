@@ -136,17 +136,21 @@ VirtualDisplaySurface::~VirtualDisplaySurface() {
 status_t VirtualDisplaySurface::setSingleLayer(const sp<Layer>& layer,
                                              const sp<GraphicBuffer>& buffer) {
     Mutex::Autolock lock(mSingleLayerMutex);
-    if (!layer || !buffer || !layer->getCompositionLayer()) return BAD_VALUE;
-    const auto it = mSingleLayerFrames.find(buffer->getId());
-    const int previous = it == mSingleLayerFrames.end() ? 0 : it->second->outstanding;
+    if (!layer || !buffer) {
+        ALOGE("vds setSingleLayer null fail! layer %p, buffer %p", layer.get(), buffer.get());
+        return BAD_VALUE;
+    }
+    if (!layer->getCompositionLayer()) return BAD_VALUE;
+    const auto it = mAttachedBuffers.find(buffer->getId());
+    const int previous = it == mAttachedBuffers.end() ? 0 : it->second->counter;
     // Avoid signed overflow on malformed/unbounded producer traffic.
     if (previous == INT_MAX) return BAD_VALUE;
-    sp<SingleLayerFrame> frame = new SingleLayerFrame;
-    frame->slot = layer->getCompositionLayer()->getState().frontEnd.bufferSlot;
-    frame->buffer = buffer;
-    frame->layer = layer;
-    frame->outstanding = previous + 1;
-    mSingleLayerFrames[buffer->getId()] = frame;
+    sp<AttachedBufferTracker> tracker = new AttachedBufferTracker;
+    tracker->slot = layer->getCompositionLayer()->getState().frontEnd.bufferSlot;
+    tracker->buffer = buffer;
+    tracker->layer = layer;
+    tracker->counter = previous + 1;
+    mAttachedBuffers[buffer->getId()] = tracker;
     return NO_ERROR;
 }
 
@@ -158,34 +162,57 @@ bool VirtualDisplaySurface::getMultiLayerFlag() {
     return mMultiLayer;
 }
 
-status_t VirtualDisplaySurface::onBufferReleasedWithFence(const sp<Fence>& fence,
-                                                         uint64_t bufferId, bool replaced) {
-    if (bufferId == UINT64_MAX) return BAD_VALUE;
-    sp<SingleLayerFrame> frame;
+status_t VirtualDisplaySurface::handleSingleLayerFence(const sp<Fence>& fence,
+                                                      uint64_t bufferId, bool replaced) {
+    if (bufferId == UINT64_MAX) {
+        ALOGE("vds handleSingleLayerFence bufferid invalid!");
+        return BAD_VALUE;
+    }
+    sp<AttachedBufferTracker> tracker;
     {
         Mutex::Autolock lock(mSingleLayerMutex);
-        if (mSingleLayerFrames.empty()) return NO_ERROR;
-        const auto it = mSingleLayerFrames.find(bufferId);
-        if (it == mSingleLayerFrames.end()) return BAD_VALUE;
-        frame = it->second;
-        if (--frame->outstanding > 0) return NO_ERROR;
-        mSingleLayerFrames.erase(it);
+        if (mAttachedBuffers.empty()) {
+            ALOGD("handleSingleLayerFence missed! %" PRIu64 " %s %d", bufferId,
+                  mDisplayName.c_str(), 0);
+            return NO_ERROR;
+        }
+        const auto it = mAttachedBuffers.find(bufferId);
+        if (it == mAttachedBuffers.end()) {
+            ALOGE("vds handleSingleLayerFence buffer not found!!! in_id %" PRIu64, bufferId);
+            return BAD_VALUE;
+        }
+        tracker = it->second;
+        if (tracker == nullptr) {
+            mAttachedBuffers.erase(it);
+            ALOGE("vds attachedBuffers size-- %d handleSingleLayerFence tracker null!  "
+                  "in_id %" PRIu64,
+                  static_cast<int>(mAttachedBuffers.size()), bufferId);
+            return BAD_VALUE;
+        }
+        if (tracker->counter - 1 > 0) {
+            tracker->counter--;
+            ALOGE("vds attachedBuffers size== %d handleSingleLayerFence replicate notify!  "
+                  "in_id %" PRIu64 " counter %d",
+                  static_cast<int>(mAttachedBuffers.size()), bufferId, tracker->counter);
+            return NO_ERROR;
+        }
+        mAttachedBuffers.erase(it);
     }
-    // Layer callbacks can register another frame. Never hold the registry lock here.
-    frame->layer->notifyFenceReady(fence, frame->buffer, frame->slot);
-    if (replaced) frame->layer->releasePendingBuffer(systemTime(SYSTEM_TIME_MONOTONIC));
+    // Layer callbacks can register another buffer. Never hold the registry lock here.
+    tracker->layer->notifyFenceReady(fence, tracker->buffer, tracker->slot);
+    if (replaced) tracker->layer->releasePendingBuffer(systemTime(SYSTEM_TIME_MONOTONIC));
     return NO_ERROR;
 }
 
-status_t VirtualDisplaySurface::notifySingleLayerBuffers() {
-    std::vector<sp<SingleLayerFrame>> frames;
+status_t VirtualDisplaySurface::clearAllSingleLayerFence() {
+    std::vector<sp<AttachedBufferTracker>> trackers;
     {
         Mutex::Autolock lock(mSingleLayerMutex);
-        for (const auto& entry : mSingleLayerFrames) frames.push_back(entry.second);
+        for (const auto& entry : mAttachedBuffers) trackers.push_back(entry.second);
     }
     // Factory disconnect notifies a snapshot; it does not erase registrations.
-    for (const auto& frame : frames) {
-        frame->layer->notifyFenceReady(Fence::NO_FENCE, frame->buffer, frame->slot);
+    for (const auto& tracker : trackers) {
+        tracker->layer->notifyFenceReady(Fence::NO_FENCE, tracker->buffer, tracker->slot);
     }
     return NO_ERROR;
 }
@@ -634,7 +661,7 @@ status_t VirtualDisplaySurface::connect(const sp<IProducerListener>& /*listener*
     const wp<VirtualDisplaySurface> weakThis(this);
     mReleaseListener->setCallback([weakThis](const sp<Fence>& fence, uint64_t id, bool replaced) {
         const sp<VirtualDisplaySurface> display = weakThis.promote();
-        return display ? display->onBufferReleasedWithFence(fence, id, replaced) : NO_INIT;
+        return display ? display->handleSingleLayerFence(fence, id, replaced) : NO_INIT;
     });
     status_t result = mSource[SOURCE_SINK]->connect(mReleaseListener, api,
             producerControlledByApp, &qbo);
@@ -648,7 +675,7 @@ status_t VirtualDisplaySurface::connect(const sp<IProducerListener>& /*listener*
 
 status_t VirtualDisplaySurface::disconnect(int api, DisconnectMode mode) {
     if (mReleaseListener) mReleaseListener->setCallback({});
-    notifySingleLayerBuffers();
+    clearAllSingleLayerFence();
     return mSource[SOURCE_SINK]->disconnect(api, mode);
 }
 

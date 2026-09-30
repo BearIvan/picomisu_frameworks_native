@@ -97,18 +97,18 @@ TEST_F(VirtualDisplaySurfaceFenceTest, DefaultsAndInvalidRegistration) {
     EXPECT_FALSE(display->getMultiLayerFlag());
     EXPECT_EQ(BAD_VALUE, display->setSingleLayer(nullptr, buffer));
     EXPECT_EQ(BAD_VALUE, display->setSingleLayer(layer, nullptr));
-    EXPECT_EQ(BAD_VALUE, display->onBufferReleasedWithFence(Fence::NO_FENCE, UINT64_MAX, false));
-    EXPECT_EQ(NO_ERROR, display->onBufferReleasedWithFence(Fence::NO_FENCE, buffer->getId(), false));
+    EXPECT_EQ(BAD_VALUE, display->handleSingleLayerFence(Fence::NO_FENCE, UINT64_MAX, false));
+    EXPECT_EQ(NO_ERROR, display->handleSingleLayerFence(Fence::NO_FENCE, buffer->getId(), false));
 }
 
 TEST_F(VirtualDisplaySurfaceFenceTest, RepeatedBufferNotifiesOnlyAfterLastReleaseUsingLatestSlot) {
     ASSERT_EQ(NO_ERROR, display->setSingleLayer(layer, buffer));
     layer->getCompositionLayer()->editState().frontEnd.bufferSlot = 7;
     ASSERT_EQ(NO_ERROR, display->setSingleLayer(layer, buffer));
-    EXPECT_EQ(NO_ERROR, display->onBufferReleasedWithFence(Fence::NO_FENCE, buffer->getId(), true));
+    EXPECT_EQ(NO_ERROR, display->handleSingleLayerFence(Fence::NO_FENCE, buffer->getId(), true));
     EXPECT_EQ(0, layer->notifications);
     EXPECT_EQ(0, layer->releases);
-    EXPECT_EQ(NO_ERROR, display->onBufferReleasedWithFence(Fence::NO_FENCE, buffer->getId(), false));
+    EXPECT_EQ(NO_ERROR, display->handleSingleLayerFence(Fence::NO_FENCE, buffer->getId(), false));
     EXPECT_EQ(1, layer->notifications);
     EXPECT_EQ(7, layer->lastSlot);
     EXPECT_EQ(buffer, layer->lastBuffer);
@@ -120,8 +120,8 @@ TEST_F(VirtualDisplaySurfaceFenceTest, LatestLayerOwnsRepeatedBuffer) {
     latest->getCompositionLayer()->editState().frontEnd.bufferSlot = 9;
     ASSERT_EQ(NO_ERROR, display->setSingleLayer(layer, buffer));
     ASSERT_EQ(NO_ERROR, display->setSingleLayer(latest, buffer));
-    display->onBufferReleasedWithFence(Fence::NO_FENCE, buffer->getId(), false);
-    display->onBufferReleasedWithFence(Fence::NO_FENCE, buffer->getId(), true);
+    display->handleSingleLayerFence(Fence::NO_FENCE, buffer->getId(), false);
+    display->handleSingleLayerFence(Fence::NO_FENCE, buffer->getId(), true);
     EXPECT_EQ(0, layer->notifications);
     EXPECT_EQ(1, latest->notifications);
     EXPECT_EQ(1, latest->releases);
@@ -131,17 +131,17 @@ TEST_F(VirtualDisplaySurfaceFenceTest, LatestLayerOwnsRepeatedBuffer) {
 TEST_F(VirtualDisplaySurfaceFenceTest, UnknownIdDoesNotConsumeRegisteredFrame) {
     ASSERT_EQ(NO_ERROR, display->setSingleLayer(layer, buffer));
     sp<GraphicBuffer> other = new GraphicBuffer;
-    EXPECT_EQ(BAD_VALUE, display->onBufferReleasedWithFence(Fence::NO_FENCE, other->getId(), false));
-    EXPECT_EQ(NO_ERROR, display->onBufferReleasedWithFence(Fence::NO_FENCE, buffer->getId(), false));
+    EXPECT_EQ(BAD_VALUE, display->handleSingleLayerFence(Fence::NO_FENCE, other->getId(), false));
+    EXPECT_EQ(NO_ERROR, display->handleSingleLayerFence(Fence::NO_FENCE, buffer->getId(), false));
     EXPECT_EQ(1, layer->notifications);
 }
 
 TEST_F(VirtualDisplaySurfaceFenceTest, ReleaseCallbackCanRegisterAgainOutsideMutex) {
     ASSERT_EQ(NO_ERROR, display->setSingleLayer(layer, buffer));
     layer->onNotify = [&] { EXPECT_EQ(NO_ERROR, display->setSingleLayer(layer, buffer)); };
-    display->onBufferReleasedWithFence(Fence::NO_FENCE, buffer->getId(), false);
+    display->handleSingleLayerFence(Fence::NO_FENCE, buffer->getId(), false);
     layer->onNotify = {};
-    display->onBufferReleasedWithFence(Fence::NO_FENCE, buffer->getId(), false);
+    display->handleSingleLayerFence(Fence::NO_FENCE, buffer->getId(), false);
     EXPECT_EQ(2, layer->notifications);
 }
 
@@ -157,7 +157,7 @@ TEST_F(VirtualDisplaySurfaceFenceTest, DisconnectNotifiesSnapshotAndDisablesList
     listener->onBufferReleasedWithFence(Fence::NO_FENCE, buffer->getId(), false);
     EXPECT_EQ(1, layer->notifications);
     // Snapshot notification preserves the outstanding registration.
-    display->onBufferReleasedWithFence(Fence::NO_FENCE, buffer->getId(), false);
+    display->handleSingleLayerFence(Fence::NO_FENCE, buffer->getId(), false);
     EXPECT_EQ(2, layer->notifications);
 }
 
@@ -268,10 +268,10 @@ TEST_F(VirtualDisplaySurfaceFenceTest, SnapshotCallbacksCanRegisterWithoutChangi
     ASSERT_EQ(NO_ERROR, display->setSingleLayer(layer, buffer));
     sp<GraphicBuffer> nextBuffer = new GraphicBuffer;
     layer->onNotify = [&] { EXPECT_EQ(NO_ERROR, display->setSingleLayer(layer, nextBuffer)); };
-    EXPECT_EQ(NO_ERROR, display->notifySingleLayerBuffers());
+    EXPECT_EQ(NO_ERROR, display->clearAllSingleLayerFence());
     EXPECT_EQ(1, layer->notifications);
     layer->onNotify = {};
-    EXPECT_EQ(NO_ERROR, display->onBufferReleasedWithFence(Fence::NO_FENCE, nextBuffer->getId(), false));
+    EXPECT_EQ(NO_ERROR, display->handleSingleLayerFence(Fence::NO_FENCE, nextBuffer->getId(), false));
     EXPECT_EQ(2, layer->notifications);
 }
 } // namespace android

@@ -4325,7 +4325,8 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
         auto& renderSurface = *display->getRenderSurface();
         const auto action = preparePicoSingleLayerComposition(
                 renderSurface, sPicoSkipSingleLayer && displayDevice->usesPicoSingleLayer(),
-                mPicoSingleLayerFallback, clientCompositionLayers, singleLayerOwner, readyFence);
+                mPicoSingleLayerFallback, clientCompositionLayers, singleLayerOwner, readyFence,
+                displayDevice->getDisplayName().c_str());
         if (action == PicoSingleLayerAction::Attached) return true;
         if (action == PicoSingleLayerAction::SkipFrame) return false;
         if (action == PicoSingleLayerAction::Render && displayDevice->isVirtual()) {
@@ -4333,7 +4334,9 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
         }
         buf = renderSurface.dequeueBuffer(&fd);
         if (!buf) {
-            ALOGW("Dequeuing buffer for display [%s] failed", displayDevice->getDisplayName().c_str());
+            ALOGW("Dequeuing buffer for display [%s] failed, bailing out of "
+                  "client composition for this frame",
+                  displayDevice->getDisplayName().c_str());
             return false;
         }
         renderEngine.drawLayers(clientCompositionDisplay, clientCompositionLayers,

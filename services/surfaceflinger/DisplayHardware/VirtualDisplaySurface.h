@@ -99,9 +99,11 @@ public:
     status_t setSingleLayer(const sp<Layer>& layer, const sp<GraphicBuffer>& buffer) override;
     void setMultiLayerFlag(bool enabled) override;
     bool getMultiLayerFlag() override;
-    virtual status_t onBufferReleasedWithFence(const sp<Fence>& fence, uint64_t bufferId,
-                                               bool replaced);
-    virtual status_t notifySingleLayerBuffers();
+    // PICO (factory names): release-with-fence callback of the sink for a buffer attached by
+    // setSingleLayer(), and the disconnect-time notification of every attached buffer.
+    virtual status_t handleSingleLayerFence(const sp<Fence>& fence, uint64_t bufferId,
+                                            bool replaced);
+    virtual status_t clearAllSingleLayerFence();
 
 private:
     friend class VirtualDisplaySurfaceFenceTest;
@@ -271,13 +273,15 @@ private:
     bool mSecure;
     int mSinkUsage;
 
-    struct SingleLayerFrame : public LightRefBase<SingleLayerFrame> {
+    // PICO: factory AttachedBufferTracker (LightRefBase, slot, buffer, layer, counter), keyed
+    // by GraphicBuffer id in mAttachedBuffers.
+    struct AttachedBufferTracker : public LightRefBase<AttachedBufferTracker> {
         int slot;
         sp<GraphicBuffer> buffer;
         sp<Layer> layer;
-        int outstanding;
+        int counter;
     };
-    std::map<uint64_t, sp<SingleLayerFrame>> mSingleLayerFrames;
+    std::map<uint64_t, sp<AttachedBufferTracker>> mAttachedBuffers;
     Mutex mSingleLayerMutex;
     bool mMultiLayer = true;
     sp<VirtualDisplayProducerListener> mReleaseListener;
