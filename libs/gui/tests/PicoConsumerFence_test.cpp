@@ -182,10 +182,11 @@ TEST_F(PicoConsumerFenceTest, StaleBufferIdDoesNotReplaceReadyFence) {
     EXPECT_EQ(expected.get(), output.get());
 }
 
-TEST_F(PicoConsumerFenceTest, LocalNotifyRejectsInvalidArguments) {
-    EXPECT_EQ(BAD_VALUE, consumer->notifyFenceReady(Fence::NO_FENCE, 1, -1));
-    EXPECT_EQ(BAD_VALUE, consumer->notifyFenceReady(Fence::NO_FENCE, 1, BufferQueueDefs::NUM_BUFFER_SLOTS));
-    EXPECT_EQ(BAD_VALUE, consumer->notifyFenceReady(nullptr, 1, 0));
+TEST_F(PicoConsumerFenceTest, LocalNotifyLogsAndIgnoresInvalidArguments) {
+    // The factory logs every rejection and returns NO_ERROR.
+    EXPECT_EQ(NO_ERROR, consumer->notifyFenceReady(Fence::NO_FENCE, 1, -1));
+    EXPECT_EQ(NO_ERROR, consumer->notifyFenceReady(Fence::NO_FENCE, 1, BufferQueueDefs::NUM_BUFFER_SLOTS));
+    EXPECT_EQ(NO_ERROR, consumer->notifyFenceReady(nullptr, 1, 0));
     EXPECT_EQ(NO_ERROR, consumer->notifyFenceReady(Fence::NO_FENCE, 1, 0));
 }
 
@@ -224,13 +225,14 @@ TEST_F(PicoConsumerFenceTest, ConsumedReadyStateIsNotReused) {
     EXPECT_EQ(0x800000000ULL, b->getUsage() & kMask);
 }
 
-TEST_F(PicoConsumerFenceTest, WakeWithoutReadySetsWakeFailureFlag) {
+TEST_F(PicoConsumerFenceTest, WakeWithoutReadyClearsTheMarker) {
+    // Factory "wait fence missed": no marker, the release fence is kept.
     sp<GraphicBuffer> b = buffer(0x200000000ULL);
     int slot;
     ASSERT_EQ(NO_ERROR, consumer->attachBuffer(&slot, b));
     sp<Fence> output = Fence::NO_FENCE;
     waitWithWake(slot, &output, false, b->getId());
-    EXPECT_EQ(0x400000000ULL, b->getUsage() & kMask);
+    EXPECT_EQ(0u, b->getUsage() & kMask);
 }
 
 TEST_F(PicoConsumerFenceTest, ReadyNotificationWakesAWaitingProducer) {
@@ -241,7 +243,8 @@ TEST_F(PicoConsumerFenceTest, ReadyNotificationWakesAWaitingProducer) {
     sp<Fence> expected = output;
     waitWithWake(slot, &output, true, b->getId());
     EXPECT_EQ(expected.get(), output.get());
-    EXPECT_EQ(0u, b->getUsage() & kMask);
+    // Factory "wait fence hit": the fence only arrived while waiting.
+    EXPECT_EQ(0x400000000ULL, b->getUsage() & kMask);
 }
 
 TEST_F(PicoConsumerFenceTest, SpecialReleaseDetachesAndNotifiesWithNoQueueMutexHeld) {

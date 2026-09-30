@@ -518,12 +518,21 @@ status_t BufferQueueConsumer::releaseBuffer(int slot, uint64_t frameNumber,
 
 status_t BufferQueueConsumer::notifyFenceReady(const sp<Fence>& fence,
                                                 uint64_t bufferId, int slot) {
+    // Factory validation: every rejection is logged and still returns NO_ERROR. The factory
+    // only rejects slot -1; any other out-of-range slot is rejected the same way here.
     if (slot < 0 || slot >= BufferQueueDefs::NUM_BUFFER_SLOTS || fence == nullptr) {
-        return BAD_VALUE;
+        ALOGE("notifyFenceReady fail! invalid fence %d, id %" PRIu64,
+              fence != nullptr ? fence->isValid() : 0, bufferId);
+        return NO_ERROR;
     }
     std::lock_guard<std::mutex> lock(mCore->mMutex);
     const sp<GraphicBuffer>& buffer = mSlots[slot].mGraphicBuffer;
-    if (buffer != nullptr && buffer->getId() == bufferId) {
+    if (buffer == nullptr) {
+        ALOGE("notifyFenceReady fail! buffer null %p", buffer.get());
+    } else if (buffer->getId() != bufferId) {
+        ALOGE("notifyFenceReady fail! buffer id not equal: in %" PRIu64 " orig %" PRIu64,
+              bufferId, buffer->getId());
+    } else {
         mSlots[slot].mPicoReadyFence = fence;
         mSlots[slot].mPicoFenceReady = true;
         mCore->mPicoFenceCondition.notify_all();

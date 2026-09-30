@@ -345,7 +345,17 @@ status_t BufferQueueProducer::waitForFreeSlotThenRelock(FreeSlotCaller caller,
                     BufferQueueCore::INVALID_BUFFER_SLOT) {
                 *found = mCore->mSharedBufferSlot;
             } else {
-                if (caller == FreeSlotCaller::Dequeue) {
+                // PICO: in fence-ready mode, dequeue prefers a new slot while the queue is
+                // below its maximum buffer count, so it does not wait on a buffer whose
+                // ready fence has not arrived yet. (The factory does not check
+                // mAllowAllocation here; without it dequeueBuffer would dereference the
+                // empty slot's null buffer.)
+                const bool picoPreferFreeSlot = caller == FreeSlotCaller::Dequeue &&
+                        mPicoFenceReadyMode && mCore->mAllowAllocation &&
+                        mCore->getMaxBufferCountLocked() >
+                                static_cast<int>(mCore->mFreeBuffers.size() +
+                                                 mCore->mActiveBuffers.size());
+                if (caller == FreeSlotCaller::Dequeue && !picoPreferFreeSlot) {
                     // If we're calling this from dequeue, prefer free buffers
                     int slot = getFreeBufferLocked();
                     if (slot != BufferQueueCore::INVALID_BUFFER_SLOT) {
@@ -672,9 +682,17 @@ void BufferQueueProducer::waitForFenceReadyBufferLocked(int slot, sp<Fence>* out
     constexpr uint64_t mask = 0xf00000000ULL;
     if (buffer == nullptr || (buffer->getUsage() & mask) != 0x200000000ULL) return;
     mPicoFenceReadyMode = true;
-    uint64_t outcome = 0;
+    // Factory markers for SurfaceFlinger's single-layer path: 0x4 = the ready fence only
+    // arrived while dequeue waited ("hit"), 0x8 = the 13.88 ms wait timed out. A buffer
+    // that was ready at once, or a wake-up without a ready fence ("missed"), gets none.
+    bool waitHit = false;
     bool timeout = false;
-    if (!mSlots[slot].mPicoFenceReady) {
+    if (mSlots[slot].mPicoFenceReady) {
+        *outFence = mSlots[slot].mPicoReadyFence;
+        mSlots[slot].mPicoFenceReady = false;
+        mSlots[slot].mPicoReadyFence = Fence::NO_FENCE;
+    } else {
+        const nsecs_t waitStart = systemTime(SYSTEM_TIME_MONOTONIC);
         std::unique_lock<std::mutex> adopted(mCore->mMutex, std::adopt_lock);
         timeout = mCore->mPicoFenceCondition.wait_for(adopted,
                 std::chrono::nanoseconds(13'880'000)) == std::cv_status::timeout;
@@ -682,16 +700,36 @@ void BufferQueueProducer::waitForFenceReadyBufferLocked(int slot, sp<Fence>* out
         adopted.release();
         buffer = mSlots[slot].mGraphicBuffer;
         if (buffer == nullptr) return;
+        if (timeout) {
+            ALOGD("dequeueBuffer wait fence ready 13.8ms timeout! slot %d, id %" PRIu64
+                  " usage %" PRIu64 " delta %" PRId64,
+                  slot, buffer->getId(), buffer->getUsage(),
+                  systemTime(SYSTEM_TIME_MONOTONIC) - waitStart);
+        } else if (mSlots[slot].mPicoFenceReady) {
+            String8 freeStates;
+            for (int freeSlot : mCore->mFreeBuffers) {
+                freeStates.appendFormat("[%d,rdy:%d] ", freeSlot,
+                                        mSlots[freeSlot].mPicoFenceReady);
+            }
+            ALOGD("dequeueBuffer wait fence hit(%s)! slot %d, id %" PRIu64 " %s  delta %" PRId64,
+                  freeStates.string(), slot, buffer->getId(), mCore->mConsumerName.string(),
+                  systemTime(SYSTEM_TIME_MONOTONIC) - waitStart);
+            *outFence = mSlots[slot].mPicoReadyFence;
+            mSlots[slot].mPicoFenceReady = false;
+            mSlots[slot].mPicoReadyFence = Fence::NO_FENCE;
+            waitHit = true;
+        } else {
+            ALOGD("dequeueBuffer wait fence missed! slot %d, id %" PRIu64, slot,
+                  buffer->getId());
+        }
     }
-    if (timeout) {
-        outcome = 0x800000000ULL;
-    } else {
-        if (!mSlots[slot].mPicoFenceReady) outcome = 0x400000000ULL;
-        *outFence = mSlots[slot].mPicoReadyFence;
-        mSlots[slot].mPicoFenceReady = false;
-        mSlots[slot].mPicoReadyFence = Fence::NO_FENCE;
+    uint64_t usage = buffer->getUsage() & ~mask;
+    if (waitHit) {
+        usage |= 0x400000000ULL;
+    } else if (timeout) {
+        usage |= 0x800000000ULL;
     }
-    buffer->usage = (buffer->getUsage() & ~mask) | outcome;
+    buffer->usage = usage;
 }
 
 status_t BufferQueueProducer::detachBuffer(int slot) {
