@@ -123,6 +123,9 @@ private:
     bool getAutoRefresh() const override;
     bool getSidebandStreamChanged() const override;
 
+    // PICO: BufferStateLayer has no consumer slots.
+    int getLatchAcquireSlot() override { return -1; }
+
     bool latchSidebandStream(bool& recomputeVisibleRegions) override;
 
     bool hasFrameUpdate() const override;

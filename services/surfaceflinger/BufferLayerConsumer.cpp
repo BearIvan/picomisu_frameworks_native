@@ -186,6 +186,15 @@ void BufferLayerConsumer::setReleaseFence(const sp<Fence>& fence) {
     }
 }
 
+int BufferLayerConsumer::getLatchAcquireSlot() {
+    Mutex::Autolock lock(mMutex);
+    return getLatchAcquireSlotLocked();
+}
+
+int BufferLayerConsumer::getLatchAcquireSlotLocked() {
+    return ConsumerBase::getLatchAcquireSlotLocked();
+}
+
 void BufferLayerConsumer::notifyFenceReady(const sp<Fence>& fence,
                                           const sp<GraphicBuffer>& buffer, int slot) {
     Mutex::Autolock lock(mMutex);

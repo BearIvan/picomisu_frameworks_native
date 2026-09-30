@@ -403,6 +403,10 @@ bool BufferLayer::onPostComposition(const std::optional<DisplayId>& displayId,
     return true;
 }
 
+int BufferLayer::getLatchSlot() {
+    return getLatchAcquireSlot();
+}
+
 bool BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime) {
     ATRACE_CALL();
 

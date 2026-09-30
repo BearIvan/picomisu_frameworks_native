@@ -588,6 +588,9 @@ public:
         return {};
     }
 
+    // PICO: consumer slot of the buffer latched last, or -1 (factory Layer::getLatchSlot).
+    virtual int getLatchSlot() { return -1; }
+
     virtual bool isBufferLatched() const { return false; }
 
     // PICO: the factory declares getAutoRefresh() on Layer (false for non-buffer layers) so

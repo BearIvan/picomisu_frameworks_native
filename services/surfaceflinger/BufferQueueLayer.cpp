@@ -252,6 +252,10 @@ uint64_t BufferQueueLayer::getFrameNumber() const {
     return frameNumber;
 }
 
+int BufferQueueLayer::getLatchAcquireSlot() {
+    return mConsumer->getLatchAcquireSlot();
+}
+
 bool BufferQueueLayer::getAutoRefresh() const {
     return mAutoRefresh;
 }

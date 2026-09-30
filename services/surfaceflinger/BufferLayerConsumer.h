@@ -106,6 +106,10 @@ public:
     void setReleaseFence(const sp<Fence>& fence);
     void notifyFenceReady(const sp<Fence>& fence, const sp<GraphicBuffer>& buffer, int slot);
 
+    // PICO: slot of the most recently acquired buffer (ConsumerBase::mLatchAcquireSlot),
+    // read under mMutex (factory BufferLayerConsumer::getLatchAcquireSlot).
+    int getLatchAcquireSlot();
+
     bool releasePendingBuffer();
 
     sp<Fence> getPrevFinalReleaseFence() const;
@@ -195,6 +199,9 @@ protected:
     virtual status_t acquireBufferLocked(BufferItem* item, nsecs_t presentWhen,
                                          uint64_t maxFrameNumber = 0) override
             EXCLUDES(mImagesMutex);
+
+    // See ConsumerBase::getLatchAcquireSlotLocked
+    int getLatchAcquireSlotLocked() override;
 
     bool canUseImageCrop(const Rect& crop) const;
 

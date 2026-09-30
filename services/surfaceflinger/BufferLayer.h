@@ -98,6 +98,9 @@ public:
     // to figure out if the content or size of a surface has changed.
     bool latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime) override;
 
+    // PICO: slot of the buffer acquired by the last latch (getLatchAcquireSlot()).
+    int getLatchSlot() override;
+
     bool isBufferLatched() const override { return mRefreshPending; }
 
     void notifyAvailableFrames() override;
@@ -136,6 +139,9 @@ private:
 
     virtual bool getAutoRefresh() const = 0;
     virtual bool getSidebandStreamChanged() const = 0;
+
+    // PICO: consumer slot of the most recently acquired buffer, or -1.
+    virtual int getLatchAcquireSlot() = 0;
 
     // Latch sideband stream and returns true if the dirty region should be updated.
     virtual bool latchSidebandStream(bool& recomputeVisibleRegions) = 0;

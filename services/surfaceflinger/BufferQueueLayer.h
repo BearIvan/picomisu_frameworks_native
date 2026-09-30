@@ -84,6 +84,8 @@ private:
     bool getAutoRefresh() const override;
     bool getSidebandStreamChanged() const override;
 
+    int getLatchAcquireSlot() override;
+
     bool latchSidebandStream(bool& recomputeVisibleRegions) override;
 
     bool hasFrameUpdate() const override;
