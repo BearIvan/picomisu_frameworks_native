@@ -20,9 +20,12 @@
 #include <utils/misc.h>
 #include <binder/BpBinder.h>
 #include <binder/IInterface.h>
+#include <binder/IPCThreadState.h>
 #include <binder/IResultReceiver.h>
 #include <binder/IShellCallback.h>
 #include <binder/Parcel.h>
+#include <binder_call_stat/BinderCallsStat.h>
+#include <private/binder/Static.h>
 
 #include <stdio.h>
 
@@ -96,6 +99,24 @@ public:
 
 // ---------------------------------------------------------------------------
 
+// PICO: process-wide native binder call statistics (libbinder_call_stat).
+// Created by "dumpsys <service> --enable" (BBinder::dump), fed by
+// BBinder::transact and deleted when its dump() returns 0 ("--disable").
+BinderStat::BinderCallsStat* mObserver = nullptr;
+
+void BBinder::setObserver()
+{
+    AutoMutex _l(gProcessMutex);
+    if (mObserver == nullptr) {
+        BinderStat::BinderCallsStat* observer;
+        {
+            AutoMutex _l2(BinderStat::gBinderStatLock);
+            observer = BinderStat::BinderCallsStat::statsInternalInstance();
+        }
+        mObserver = observer;
+    }
+}
+
 BBinder::BBinder() : mExtras(nullptr)
 {
 }
@@ -130,9 +151,19 @@ status_t BBinder::transact(
         case PING_TRANSACTION:
             reply->writeInt32(pingBinder());
             break;
-        default:
+        default: {
+            BinderStat::CallSession* callSession = nullptr;
+            if (mObserver != nullptr) {
+                callSession = mObserver->binderCallStarted(getInterfaceDescriptor(), code, flags,
+                        IPCThreadState::self()->getCallingPid());
+            }
             err = onTransact(code, data, reply, flags);
+            if (mObserver != nullptr) {
+                mObserver->binderCallEnded(callSession, data.dataSize(), reply->dataSize(),
+                        IPCThreadState::self()->getCallingUid(), err);
+            }
             break;
+        }
     }
 
     if (reply != nullptr) {
@@ -158,8 +189,24 @@ status_t BBinder::unlinkToDeath(
     return INVALID_OPERATION;
 }
 
-status_t BBinder::dump(int /*fd*/, const Vector<String16>& /*args*/)
+status_t BBinder::dump(int fd, const Vector<String16>& args)
 {
+    // PICO: "--enable" creates the call statistics observer; any other argument
+    // lets the observer dump (or handle "--disable" / "--sample-interval N").
+    int argc = args.size();
+    for (int i = 0; i < argc; i++) {
+        if (args[i] == String16("--enable")) {
+            setObserver();
+        } else {
+            ALOGD("NativeBinderStat dump other stat");
+            AutoMutex _l(gProcessMutex);
+            if (mObserver != nullptr && mObserver->dump(fd, args) == 0) {
+                delete mObserver;
+                mObserver = nullptr;
+            }
+            break;
+        }
+    }
     return NO_ERROR;
 }
 

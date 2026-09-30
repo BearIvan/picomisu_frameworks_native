@@ -26,6 +26,14 @@
 typedef  int  uid_t;
 #endif
 
+// PICO kernel query result: the processes on the other side of the target's
+// Binder transactions (at most ten).
+struct binder_remote_pids {
+    int32_t pids[10];
+    int32_t count;
+    int32_t pid;
+};
+
 // ---------------------------------------------------------------------------
 namespace android {
 
@@ -45,6 +53,11 @@ public:
             // PICO kernel query; returns -1 if the driver rejects the request.
             pid_t               getCallingTid();
             pid_t               getLastFrozenPid() const;
+            // PICO/Smartisan kernel freeze controls and queries.
+            status_t            setPidFreeze(int pid, bool freeze, int mode);
+            pid_t               getTargetCalleePid(int pid, int tid);
+            status_t            getBinderServerPids(binder_remote_pids* pids);
+            status_t            getBinderClientPids(binder_remote_pids* pids);
             // nullptr if unavailable
             //
             // this can't be restored once it's cleared, and it does not return the

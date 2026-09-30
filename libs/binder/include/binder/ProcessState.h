@@ -36,6 +36,10 @@ class ProcessState : public virtual RefBase
 public:
     static  sp<ProcessState>    self();
     static  sp<ProcessState>    selfOrNull();
+    // PICO: create the /dev/binder state with a larger transaction buffer
+    // (system_server) or the runtime size (OpenXR runtime process).
+    static  sp<ProcessState>    selfForSystemServer();
+    static  sp<ProcessState>    selfForRuntime();
 
     /* initWithDriver() can be used to configure libbinder to use
      * a different binder driver dev node. It must be called *before*
@@ -93,6 +97,7 @@ private:
     friend class IPCThreadState;
     
             explicit            ProcessState(const char* driver);
+                                ProcessState(const char* driver, unsigned int vmSize);
                                 ~ProcessState();
 
                                 ProcessState(const ProcessState& o);

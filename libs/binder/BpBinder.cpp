@@ -24,6 +24,8 @@
 #include <cutils/compiler.h>
 #include <utils/Log.h>
 
+#include <private/binder/PicoFreeze.h>
+
 #include <stdio.h>
 
 //#undef ALOGV
@@ -212,8 +214,13 @@ status_t BpBinder::transact(
 {
     // Once a binder has died, it will never come back to life.
     if (mAlive) {
+        // PICO: always ask the driver to report a frozen target. A caller that did
+        // not request the report itself sees DEAD_OBJECT, but the proxy stays alive.
         status_t status = IPCThreadState::self()->transact(
-            mHandle, code, data, reply, flags);
+            mHandle, code, data, reply, flags | PICO_TF_REPORT_FROZEN);
+        if (status == PICO_FROZEN_TRANSACTION) {
+            return (flags & PICO_TF_REPORT_FROZEN) ? PICO_FROZEN_TRANSACTION : DEAD_OBJECT;
+        }
         if (status == DEAD_OBJECT) mAlive = 0;
         return status;
     }

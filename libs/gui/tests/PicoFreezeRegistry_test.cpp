@@ -1,10 +1,15 @@
 // Copyright 2026 Picomisu contributors
 // SPDX-License-Identifier: Apache-2.0
+// Lifetime and locking of the factory-exact FreezeManager self registry.
+// Factory behaviour: records are never freed, a repeated key keeps the first
+// record, and callbacks run under the registry lock (so a callback must not
+// register or unregister on the same thread; that deadlocks as on the factory).
 #include <binder/FreezeManager.h>
 #include <gtest/gtest.h>
 #include <atomic>
 #include <chrono>
 #include <future>
+#include <memory>
 #include <unistd.h>
 #include "PicoFreezeRegistryFake.h"
 using namespace android;
@@ -25,36 +30,41 @@ protected:
     FreezeManager* manager;
     sp<picomisu::FreezeService> service;
 };
-TEST_F(FreezeRegistryTest, CallableOwnershipIsReleasedOnUnregister) {
+TEST_F(FreezeRegistryTest, CallableIsRetainedAfterUnregisterAsOnFactory) {
     int key;
     auto owner = std::make_shared<int>(1);
     std::weak_ptr<int> weak = owner;
     manager->registerSelfUnFreezeListener(&key, [owner](const void*) {}, nullptr, false);
     owner.reset();
-    EXPECT_FALSE(weak.expired());
     manager->unRegisterSelfUnFreezeListener(&key);
-    EXPECT_TRUE(weak.expired());
+    EXPECT_FALSE(weak.expired());
 }
-TEST_F(FreezeRegistryTest, CallbackCanRemoveItselfWithoutLateInvocation) {
-    int key, calls = 0;
-    manager->registerSelfUnFreezeListener(&key, [&](const void*) {
-        ++calls;
-        manager->unRegisterSelfUnFreezeListener(&key);
-    }, nullptr, false);
-    emit(); emit();
-    EXPECT_EQ(1, calls);
-}
-TEST_F(FreezeRegistryTest, RemovingAnotherRecordSkipsItInCurrentSnapshot) {
-    int keys[2], first = 0, second = 0;
-    manager->registerSelfUnFreezeListener(&keys[0], [&](const void*) {
-        ++first;
-        manager->unRegisterSelfUnFreezeListener(&keys[1]);
-    }, nullptr, false);
-    manager->registerSelfUnFreezeListener(&keys[1], [&](const void*) { ++second; }, nullptr, false);
+TEST_F(FreezeRegistryTest, RepeatedKeyKeepsFirstRecordAndRetainsSecond) {
+    int key, first = 0, second = 0;
+    auto secondOwner = std::make_shared<int>(2);
+    std::weak_ptr<int> weakSecond = secondOwner;
+    manager->registerSelfUnFreezeListener(&key, [&](const void*) { ++first; }, nullptr, false);
+    manager->registerSelfUnFreezeListener(&key, [&, secondOwner](const void*) { ++second; },
+                                          nullptr, false);
+    secondOwner.reset();
     emit();
     EXPECT_EQ(1, first);
     EXPECT_EQ(0, second);
-    manager->unRegisterSelfUnFreezeListener(&keys[0]);
+    EXPECT_FALSE(weakSecond.expired());
+    manager->unRegisterSelfUnFreezeListener(&key);
+    emit();
+    EXPECT_EQ(1, first);
+}
+TEST_F(FreezeRegistryTest, ArgumentIsPassedAndEmptyCallableIsSkipped) {
+    int key1, key2, value = 7;
+    const void* seen = nullptr;
+    manager->registerSelfUnFreezeListener(&key1, [&](const void* argument) { seen = argument; },
+                                          &value, false);
+    manager->registerSelfUnFreezeListener(&key2, {}, nullptr, false);
+    emit();
+    EXPECT_EQ(&value, seen);
+    manager->unRegisterSelfUnFreezeListener(&key1);
+    manager->unRegisterSelfUnFreezeListener(&key2);
 }
 TEST_F(FreezeRegistryTest, ConcurrentUnregisterWaitsForActiveCallback) {
     using namespace std::chrono_literals;

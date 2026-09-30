@@ -195,7 +195,9 @@ cc_test {
     ldflags: ["-Wl,--export-dynamic"],
     sanitize: { address: true },
     cflags: ["-Wall", "-Werror"],
-    srcs: ["PicoFreezeRegistry_test.cpp", ":picomisu_freeze_manager_sources"],
+    // The factory-exact FreezeManager exports its registry globals, so the test uses the
+    // libbinder implementation instead of a second instrumented copy.
+    srcs: ["PicoFreezeRegistry_test.cpp"],
     shared_libs: ["libbinder", "libutils", "liblog"],
 }
 
@@ -217,6 +219,16 @@ cc_test {
     cflags: ["-Wall", "-Werror"],
     srcs: ["PicoFreezeRemote_probe.cpp"],
     shared_libs: ["libbinder", "libutils", "liblog", "libdl"],
+}
+
+cc_test {
+    name: "picomisu_binder_parity_probe",
+    gtest: false,
+    compile_multilib: "both",
+    ldflags: ["-Wl,--export-dynamic"],
+    cflags: ["-Wall", "-Werror"],
+    srcs: ["PicoBinderParity_probe.cpp"],
+    shared_libs: ["libbinder", "libutils", "liblog"],
 }
 
 cc_test {

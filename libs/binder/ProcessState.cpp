@@ -40,7 +40,10 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#define BINDER_VM_SIZE ((1 * 1024 * 1024) - sysconf(_SC_PAGE_SIZE) * 2)
+// PICO OS 5.13.7 doubles the default transaction buffer; system_server maps 4 MiB.
+#define BINDER_VM_SIZE ((2 * 1024 * 1024) - sysconf(_SC_PAGE_SIZE) * 2)
+#define BINDER_VM_SIZE_SYSTEM_SERVER ((4 * 1024 * 1024) - sysconf(_SC_PAGE_SIZE) * 2)
+#define BINDER_VM_SIZE_RUNTIME ((2 * 1024 * 1024) - sysconf(_SC_PAGE_SIZE) * 2)
 #define DEFAULT_MAX_BINDER_THREADS 15
 
 #ifdef __ANDROID_VNDK__
@@ -452,6 +455,60 @@ ProcessState::ProcessState(const char *driver)
     LOG_ALWAYS_FATAL_IF(mDriverFD < 0, "Binder driver could not be opened.  Terminating.");
 }
 
+sp<ProcessState> ProcessState::selfForSystemServer()
+{
+    Mutex::Autolock _l(gProcessMutex);
+    if (gProcess != nullptr) {
+        return gProcess;
+    }
+    gProcess = new ProcessState("/dev/binder", BINDER_VM_SIZE_SYSTEM_SERVER);
+    return gProcess;
+}
+
+ProcessState::ProcessState(const char *driver, unsigned int vmSize)
+    : mDriverName(String8(driver))
+    , mDriverFD(open_driver(driver))
+    , mVMStart(MAP_FAILED)
+    , mThreadCountLock(PTHREAD_MUTEX_INITIALIZER)
+    , mThreadCountDecrement(PTHREAD_COND_INITIALIZER)
+    , mExecutingThreadsCount(0)
+    , mMaxThreads(DEFAULT_MAX_BINDER_THREADS)
+    , mStarvationStartTimeMs(0)
+    , mManagesContexts(false)
+    , mBinderContextCheckFunc(nullptr)
+    , mBinderContextUserData(nullptr)
+    , mThreadPoolStarted(false)
+    , mThreadPoolSeq(1)
+    , mCallRestriction(CallRestriction::NONE)
+{
+    if (mDriverFD >= 0) {
+        // mmap the binder, providing a chunk of virtual address space to receive transactions.
+        mVMStart = mmap(nullptr, vmSize, PROT_READ, MAP_PRIVATE | MAP_NORESERVE, mDriverFD, 0);
+        if (mVMStart == MAP_FAILED) {
+            // *sigh*
+            ALOGE("Using %s failed: unable to mmap transaction memory.\n", mDriverName.c_str());
+            close(mDriverFD);
+            mDriverFD = -1;
+            mDriverName.clear();
+        }
+    }
+
+    LOG_ALWAYS_FATAL_IF(mDriverFD < 0, "Binder driver '%s' could not be opened.  Terminating.",
+                        driver);
+}
+
+sp<ProcessState> ProcessState::selfForRuntime()
+{
+    Mutex::Autolock _l(gProcessMutex);
+    if (gProcess != nullptr) {
+        return gProcess;
+    }
+    gProcess = new ProcessState("/dev/binder", BINDER_VM_SIZE_RUNTIME);
+    return gProcess;
+}
+
+// PICO: the destructor unmaps BINDER_VM_SIZE also for the enlarged
+// system_server mapping, as the factory libbinder does.
 ProcessState::~ProcessState()
 {
     if (mDriverFD >= 0) {

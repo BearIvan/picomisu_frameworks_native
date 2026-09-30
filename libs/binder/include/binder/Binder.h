@@ -60,6 +60,10 @@ public:
 
     virtual BBinder*    localBinder();
 
+    // PICO: creates the process-wide native binder call statistics observer
+    // (libbinder_call_stat), as requested by "dumpsys <service> --enable".
+    static  void        setObserver();
+
     bool                isRequestingSid();
     // This must be called before the object is sent to another process. Not thread safe.
     void                setRequestingSid(bool requestSid);

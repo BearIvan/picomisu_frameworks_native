@@ -367,6 +367,26 @@ pid_t IPCThreadState::getCallingPid() const
     return mCallingPid;
 }
 
+status_t IPCThreadState::setPidFreeze(int pid, bool freeze, int mode)
+{
+    // The PICO driver reads the first three words: target PID, freeze state, freeze mode.
+    int32_t request[4] = {pid, freeze, mode, 0};
+    if (ioctl(mProcess->mDriverFD, PICO_BINDER_FREEZE_PID, request) < 0) {
+        alog << "binder freeze pid failed" << endl;
+        return -1;
+    }
+    return NO_ERROR;
+}
+
+pid_t IPCThreadState::getTargetCalleePid(int pid, int tid)
+{
+    int32_t request[3] = {pid, tid, 0};
+    if (ioctl(mProcess->mDriverFD, PICO_BINDER_GET_TARGET_CALLEE_PID, request) < 0) {
+        request[2] = -1;
+    }
+    return request[2];
+}
+
 pid_t IPCThreadState::getCallingTid()
 {
     int32_t caller = 0;
@@ -378,6 +398,20 @@ pid_t IPCThreadState::getCallingTid()
 
 pid_t IPCThreadState::getLastFrozenPid() const {
     return mLastFrozenPid;
+}
+
+static_assert(sizeof(binder_remote_pids) == 48, "PICO ioctl size bits");
+
+status_t IPCThreadState::getBinderServerPids(binder_remote_pids* pids)
+{
+    if (pids == nullptr) return -1;
+    return ioctl(mProcess->mDriverFD, PICO_BINDER_GET_SERVER_PIDS, pids);
+}
+
+status_t IPCThreadState::getBinderClientPids(binder_remote_pids* pids)
+{
+    if (pids == nullptr) return -1;
+    return ioctl(mProcess->mDriverFD, PICO_BINDER_GET_CLIENT_PIDS, pids);
 }
 
 

@@ -36,7 +36,7 @@ void SoundSettings::registerTrackMuteListener(int trackId, ISoundCallback* callb
     pthread_mutex_lock(mMutexSound);
     SoundSettings* settings = instance;
     __android_log_print(ANDROID_LOG_INFO, nullptr, "register trackId = %d ", trackId);
-    settings->mCallbacks.emplace(trackId, callback);
+    settings->mCallbacks.insert(std::pair<int, ISoundCallback*>(trackId, callback));
     callback->onSoundCallback(mPrefetch, true);
     pthread_mutex_unlock(mMutexSound);
 }

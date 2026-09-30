@@ -59,6 +59,7 @@ cc_library_shared {
         "IPermissionController.cpp",
         "IProcessInfoService.cpp",
         "IResultReceiver.cpp",
+        "ISceneInfoManager.cpp",
         "IServiceManager.cpp",
         "IShellCallback.cpp",
         "IUidObserver.cpp",
@@ -72,6 +73,8 @@ cc_library_shared {
         "PersistableBundle.cpp",
         "ProcessInfoService.cpp",
         "ProcessState.cpp",
+        "SceneData.cpp",
+        "SceneInfoManager.cpp",
         "SoundSettings.cpp",
         "Static.cpp",
         "Status.cpp",
@@ -125,6 +128,7 @@ cc_library_shared {
         "libcutils",
         "libutils",
         "libbinderthreadstate",
+        "libbinder_call_stat",
     ],
 
     header_libs: [
@@ -150,9 +154,3 @@ filegroup {
 }
 
 subdirs = ["tests"]
-
-// Instrument the actual registry implementation in focused lifetime tests.
-filegroup {
-    name: "picomisu_freeze_manager_sources",
-    srcs: ["FreezeManager.cpp"],
-}
