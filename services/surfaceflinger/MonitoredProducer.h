@@ -85,6 +85,9 @@ private:
     wp<Layer> mLayer;
     SurfaceMonitor mPicoMonitor;
     SurfaceClient mPicoClient;
+    // PICO: set by disconnect(); the next connect() asks for a repaint when the layer's
+    // producer is in auto-refresh (SINGLE_BUFFER) mode.
+    bool mDisconnected = false;
 };
 
 }; // namespace android

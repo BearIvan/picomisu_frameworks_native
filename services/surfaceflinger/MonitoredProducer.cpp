@@ -14,6 +14,11 @@
  * limitations under the License.
  */
 
+#undef LOG_TAG
+#define LOG_TAG "SurfaceFlinger"
+
+#include <log/log.h>
+
 #include "MonitoredProducer.h"
 #include "Layer.h"
 #include "SurfaceFlinger.h"
@@ -116,10 +121,25 @@ int MonitoredProducer::query(int what, int* value) {
 
 status_t MonitoredProducer::connect(const sp<IProducerListener>& listener,
         int api, bool producerControlledByApp, QueueBufferOutput* output) {
+    // PICO: an auto-refresh producer that reconnects would otherwise keep showing its old
+    // shared buffer, so repaint on the main thread and let the layer latch once more.
+    const sp<Layer> layer = mLayer.promote();
+    if (layer != nullptr && mDisconnected) {
+        mFlinger->postMessageAsync(new LambdaMessage([flinger = mFlinger, layer]() {
+            if (layer->getAutoRefresh()) {
+                ALOGI("repaintEverything when layer=(%s) producer reconnected",
+                      layer->getName().string());
+                flinger->repaintEverything();
+                layer->setProducerReconnected(true);
+            }
+        }));
+        mDisconnected = false;
+    }
     return mProducer->connect(listener, api, producerControlledByApp, output);
 }
 
 status_t MonitoredProducer::disconnect(int api, DisconnectMode mode) {
+    mDisconnected = true;
     return mProducer->disconnect(api, mode);
 }
 

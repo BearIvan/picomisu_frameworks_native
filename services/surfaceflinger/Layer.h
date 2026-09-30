@@ -590,6 +590,10 @@ public:
 
     virtual bool isBufferLatched() const { return false; }
 
+    // PICO: the factory declares getAutoRefresh() on Layer (false for non-buffer layers) so
+    // that SurfaceFlinger and MonitoredProducer can query any layer.
+    virtual bool getAutoRefresh() const { return false; }
+
     /*
      * Remove relative z for the layer if its relative parent is not part of the
      * provided layer tree.

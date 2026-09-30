@@ -434,7 +434,12 @@ bool BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime) 
     // compositionComplete() call.
     // we'll trigger an update in onPreComposition().
     if (mRefreshPending) {
-        return false;
+        // PICO: an auto-refresh (SINGLE_BUFFER) producer that reconnected gets one latch
+        // even though the previous one has not been composed yet.
+        if (!getAutoRefresh() || !mProducerReconnected) {
+            return false;
+        }
+        ALOGI("latchBuffer force refresh when producer reconnected, %s", mName.string());
     }
 
     // If the head buffer's acquire fence hasn't signaled yet, return and
@@ -472,6 +477,7 @@ bool BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime) 
         return false;
     }
 
+    mProducerReconnected = false;
     mRefreshPending = true;
     mFrameLatencyNeeded = true;
     if (oldBuffer == nullptr) {
@@ -524,6 +530,10 @@ bool BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime) 
         uint32_t bufWidth = mActiveBuffer->getWidth();
         uint32_t bufHeight = mActiveBuffer->getHeight();
         if (bufWidth != uint32_t(oldBuffer->width) || bufHeight != uint32_t(oldBuffer->height)) {
+            recomputeVisibleRegions = true;
+        } else if (getAutoRefresh() && oldBuffer->handle != mActiveBuffer->handle) {
+            // PICO: the shared buffer of an auto-refresh producer was replaced.
+            ALOGE("%s: use diffrent buffer in SINGLE_BUFFER mode", __FUNCTION__);
             recomputeVisibleRegions = true;
         }
     }
