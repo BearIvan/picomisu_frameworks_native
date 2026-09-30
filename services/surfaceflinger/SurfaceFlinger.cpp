@@ -728,6 +728,8 @@ void SurfaceFlinger::bootFinished()
 
     postMessageAsync(new LambdaMessage([this]() NO_THREAD_SAFETY_ANALYSIS {
         readPersistentProperties();
+        // PICO (factory bootFinished): persist.pvr.sf.* are readable now.
+        mPhaseOffsets->updateConfigExt();
         mBootStage = BootStage::FINISHED;
 
         if (mUseFbScaling) {
@@ -2261,6 +2263,20 @@ void SurfaceFlinger::handleMessageRefresh() {
     mVsyncModulator.onRefreshed(mHadClientComposition);
 
     mLayersWithQueuedFrames.clear();
+
+    // PICO (factory handleMessageRefresh): VR late phase offsets follow the panel refresh rate.
+    nsecs_t vsyncPeriod;
+    {
+        Mutex::Autolock lock(mStateLock);
+        vsyncPeriod = getVsyncPeriod();
+    }
+    if (mPhaseOffsets->updatePhaseOffsetsExt(vsyncPeriod)) {
+        // DispSync itself is resynced by CAF forceResyncModel() in postComposition().
+        ATRACE_NAME("updatePhaseOffsetsIfNeededExt");
+        const auto [early, gl, late] = mPhaseOffsets->getCurrentOffsets();
+        mVsyncModulator.setPhaseOffsets(early, gl, late,
+                                        mPhaseOffsets->getOffsetThresholdForNextVsync());
+    }
 }
 
 

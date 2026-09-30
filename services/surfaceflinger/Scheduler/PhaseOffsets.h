@@ -50,6 +50,11 @@ public:
     virtual nsecs_t getOffsetThresholdForNextVsync() const = 0;
     virtual void dump(std::string& result) const = 0;
     virtual void setDefaultRefreshRateType(RefreshRateConfigs::RefreshRateType type) = 0;
+
+    // PICO (factory PhaseOffsets::updateConfigExt/updatePhaseOffsetsExt): late offsets of the
+    // VR refresh rates from persist.pvr.sf.*, applied when the vsync period changes.
+    virtual void updateConfigExt() {}
+    virtual bool updatePhaseOffsetsExt(nsecs_t /*vsyncPeriod*/) { return false; }
 };
 
 namespace impl {
@@ -85,6 +90,9 @@ public:
         mDefaultPhaseOffsetType = refreshRateType;
     }
 
+    void updateConfigExt() override;
+    bool updatePhaseOffsetsExt(nsecs_t vsyncPeriod) override;
+
 private:
     std::atomic<RefreshRateConfigs::RefreshRateType> mRefreshRateType =
             RefreshRateConfigs::RefreshRateType::DEFAULT;
@@ -93,6 +101,12 @@ private:
     nsecs_t mOffsetThresholdForNextVsync;
     RefreshRateConfigs::RefreshRateType mDefaultPhaseOffsetType =
         RefreshRateConfigs::RefreshRateType::DEFAULT;
+
+    // PICO late offsets (sf, app) and the update-tex-image offset for 72 Hz and 90 Hz panels.
+    nsecs_t mPicoSf72 = 0, mPicoApp72 = 0, mPicoTextImage72 = 0;
+    nsecs_t mPicoSf90 = 0, mPicoApp90 = 0, mPicoTextImage90 = 0;
+    nsecs_t mPicoTextImageOffset = 0;
+    nsecs_t mPicoVsyncPeriod = 0;
 };
 } // namespace impl
 

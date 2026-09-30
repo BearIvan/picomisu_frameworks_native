@@ -185,6 +185,50 @@ PhaseOffsets::PhaseOffsets() {
     mOffsetThresholdForNextVsync = phaseOffsetThresholdForNextVsyncNs != -1
             ? phaseOffsetThresholdForNextVsyncNs
             : std::numeric_limits<nsecs_t>::max();
+
+    updateConfigExt();
+}
+
+void PhaseOffsets::updateConfigExt() {
+    // Property names and defaults as in the factory libsurfaceflinger.so.
+    char value[PROPERTY_VALUE_MAX];
+    property_get("persist.pvr.sf.fps_early_gl_sf_phase_offset_ns_90hz", value, "860000");
+    mPicoSf90 = atoi(value);
+    property_get("persist.pvr.sf.fps_early_gl_app_phase_offset_ns_90hz", value, "-3640000");
+    mPicoApp90 = atoi(value);
+    property_get("persist.pvr.sf.fps_early_gl_sf_phase_offset_ns_72hz", value, "-1920000");
+    mPicoSf72 = atoi(value);
+    property_get("persist.pvr.sf.fps_early_gl_app_phase_offset_ns_72hz", value, "-920000");
+    mPicoApp72 = atoi(value);
+    property_get("persist.pvr.sf.fps_update_text_image_phase_offset_ns_72hz", value, "-2920000");
+    mPicoTextImage72 = atoi(value);
+    property_get("persist.pvr.sf.fps_update_text_image_phase_offset_ns_90hz", value, "140000");
+    mPicoTextImage90 = atoi(value);
+    // Re-apply on the next refresh.
+    mPicoTextImageOffset = 0;
+    mPicoVsyncPeriod = 0;
+}
+
+bool PhaseOffsets::updatePhaseOffsetsExt(nsecs_t vsyncPeriod) {
+    // No active display yet (getVsyncPeriod() returns 0): keep the current offsets.
+    if (vsyncPeriod <= 0 || vsyncPeriod == mPicoVsyncPeriod) {
+        return false;
+    }
+    // Factory threshold: a period below 12.5 ms is the 90 Hz panel mode, otherwise 72 Hz.
+    const bool is90Hz = vsyncPeriod < 12500000;
+    mPicoTextImageOffset = is90Hz ? mPicoTextImage90 : mPicoTextImage72;
+    const nsecs_t sf = is90Hz ? mPicoSf90 : mPicoSf72;
+    const nsecs_t app = is90Hz ? mPicoApp90 : mPicoApp72;
+    // As in the factory: the late offsets of every non-low refresh rate type are replaced;
+    // POWER_SAVING and LOW0..LOW2 keep the debug.sf.* defaults.
+    for (const RefreshRateType type : {RefreshRateType::DEFAULT, RefreshRateType::PERFORMANCE,
+                                       RefreshRateType::HIGH1, RefreshRateType::HIGH2}) {
+        auto& late = mOffsets.at(type).late;
+        late.sf = sf;
+        late.app = app;
+    }
+    mPicoVsyncPeriod = vsyncPeriod;
+    return true;
 }
 
 PhaseOffsets::Offsets PhaseOffsets::getOffsetsForRefreshRate(
@@ -200,6 +244,7 @@ void PhaseOffsets::dump(std::string& result) const {
                         "   early app phase: %9" PRId64 " ns\t   early SF phase: %9" PRId64 " ns\n"
                         "GL early app phase: %9" PRId64 " ns\tGL early SF phase: %9" PRId64 " ns\n",
                         late.app, late.sf, early.app, early.sf, earlyGl.app, earlyGl.sf);
+    base::StringAppendF(&result, "updateTextImage phase: %9" PRId64 " ns\t\n", mPicoTextImageOffset);
 }
 
 nsecs_t PhaseOffsets::getCurrentAppOffset() {
