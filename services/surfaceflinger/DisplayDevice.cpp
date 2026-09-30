@@ -29,6 +29,8 @@
 #include <compositionengine/RenderSurfaceCreationArgs.h>
 #include <compositionengine/impl/OutputCompositionState.h>
 #include <configstore/Utils.h>
+#include <cutils/properties.h>
+#include <stdlib.h>
 #include <log/log.h>
 #include <system/window.h>
 #include <ui/GraphicTypes.h>
@@ -285,6 +287,17 @@ void DisplayDevice::setProjection(int orientation,
         DisplayDevice::orientationToTransfrom(
                 (orientation + mDisplayInstallOrientation) % (DisplayState::eOrientation270 + 1),
                 w, h, &R);
+    } else {
+        // PICO: pxr.sf.screenrecord.fliphv turns a secondary display that mirrors layer
+        // stack 0 (screen recording / casting of the main display) by 180 degrees.
+        char flipValue[PROPERTY_VALUE_MAX];
+        property_get("pxr.sf.screenrecord.fliphv", flipValue, "0");
+        if (atoi(flipValue) && getCompositionDisplay()->getState().layerStackId == 0) {
+            DisplayDevice::orientationToTransfrom(
+                    (orientation + DisplayState::eOrientation180) %
+                            (DisplayState::eOrientation270 + 1),
+                    w, h, &R);
+        }
     }
 
     // The viewport and frame are both in the logical orientation.

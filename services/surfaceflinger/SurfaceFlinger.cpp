@@ -7245,8 +7245,17 @@ void SurfaceFlinger::renderScreenImplLocked(const RenderArea& renderArea,
 
     const auto reqWidth = renderArea.getReqWidth();
     const auto reqHeight = renderArea.getReqHeight();
-    const auto rotation = renderArea.getRotationFlags();
+    auto rotation = renderArea.getRotationFlags();
     const auto transform = renderArea.getTransform();
+
+    // PICO: pxr.sf.screencapture.fliphv turns screenshots by 180 degrees (flips both axes),
+    // on top of the requested rotation: 0 <-> 180 and 90 <-> 270.
+    char flipValue[PROPERTY_VALUE_MAX];
+    property_get("pxr.sf.screencapture.fliphv", flipValue, "0");
+    if (atoi(flipValue)) {
+        rotation = static_cast<ui::Transform::orientation_flags>(rotation ^
+                                                                 ui::Transform::ROT_180);
+    }
     const auto sourceCrop = renderArea.getSourceCrop();
 
     renderengine::DisplaySettings clientCompositionDisplay;
