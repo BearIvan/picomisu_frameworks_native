@@ -1131,6 +1131,8 @@ private:
     bool mUseHwcVirtualDisplays = false;
     bool mUseFbScaling = false;
     bool mUseAdvanceSfOffset = false;
+    // PICO: last entry of a setAllowedDisplayConfigs request from the VR runtime.
+    static constexpr int32_t kPicoDisplayConfigMarker = 3;
     std::atomic<uint32_t> mFrameMissedCount = 0;
     std::atomic<uint32_t> mHwcFrameMissedCount = 0;
     std::atomic<uint32_t> mGpuFrameMissedCount = 0;

@@ -7448,6 +7448,22 @@ status_t SurfaceFlinger::setAllowedDisplayConfigs(const sp<IBinder>& displayToke
         return NO_ERROR;
     }
 
+    // PICO (factory libsurfaceflinger): the VR runtime (pxrhmdservice) owns the display refresh
+    // rate. Its requests end with the marker config kPicoDisplayConfigMarker, which is dropped;
+    // requests without it (DisplayManager's refresh rate policy) are rejected, otherwise the
+    // policy would switch the panel back to 90 Hz under a 72 Hz VR runtime.
+    std::vector<int32_t> configs;
+    for (size_t i = 0; i < allowedConfigs.size(); i++) {
+        ALOGE("SurfaceFlinger::setAllowedDisplayConfigs allowedConfigs[i] :%d ", allowedConfigs[i]);
+        configs.push_back(allowedConfigs[i]);
+    }
+    if (std::find(configs.begin(), configs.end(), kPicoDisplayConfigMarker) == configs.end()) {
+        ALOGE("no pico parameter so allow to change display config through surfaceflinger");
+        return BAD_VALUE;
+    }
+    ALOGE("has pico parameter so allow to change display config through surfaceflinger");
+    configs.pop_back();
+
     postMessageSync(new LambdaMessage([&]() {
         const auto display = getDisplayDeviceLocked(displayToken);
         if (!display) {
@@ -7457,7 +7473,7 @@ status_t SurfaceFlinger::setAllowedDisplayConfigs(const sp<IBinder>& displayToke
             ALOGW("Attempt to set allowed display configs for virtual display");
         } else {
             Mutex::Autolock lock(mStateLock);
-            setAllowedDisplayConfigsInternal(display, allowedConfigs);
+            setAllowedDisplayConfigsInternal(display, configs);
         }
     }));
 
