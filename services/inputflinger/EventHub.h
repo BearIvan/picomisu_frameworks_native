@@ -481,6 +481,15 @@ private:
     bool mPendingINotify;
 
     bool mUsingEpollWakeup;
+
+    // PICO: controller connection status from the station service, through
+    // libstationclient.pxr.so (dlopen'ed in the constructor). mapKey() uses it to turn the
+    // headset volume keys into HOME / DEFINE_CONFIRM while no controller is connected.
+    typedef void* (*CreateStationClientFunc)();
+    typedef int (*GetControllerStatusFunc)(void* client, void* outStatus);
+    CreateStationClientFunc mCreateStationClient = nullptr;
+    GetControllerStatusFunc mGetControllerStatus = nullptr;
+    void* mStationClient = nullptr;
 };
 
 }; // namespace android

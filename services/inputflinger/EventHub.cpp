@@ -16,6 +16,7 @@
 
 #include <assert.h>
 #include <dirent.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -297,6 +298,25 @@ EventHub::EventHub(void) :
     getLinuxRelease(&major, &minor);
     // EPOLLWAKEUP was introduced in kernel 3.5
     mUsingEpollWakeup = major > 3 || (major == 3 && minor >= 5);
+
+    // PICO: station service client for the controller status used by mapKey().
+    // The factory keeps neither the handle nor a dlclose().
+    std::string stationClientLib = "libstationclient.pxr.so";
+    void* handle = dlopen(stationClientLib.c_str(), RTLD_NOW);
+    if (handle) {
+        mCreateStationClient = reinterpret_cast<CreateStationClientFunc>(
+                dlsym(handle, "CreateStationClient"));
+        mGetControllerStatus = reinterpret_cast<GetControllerStatusFunc>(
+                dlsym(handle, "GetControllerStatus"));
+        mStationClient = mCreateStationClient ? mCreateStationClient() : nullptr;
+        if (mStationClient) {
+            ALOGI("Create client OK");
+        } else {
+            ALOGI("Create client Failed");
+        }
+    } else {
+        ALOGI("Error opening %s %s\n", stationClientLib.c_str(), dlerror());
+    }
 }
 
 EventHub::~EventHub(void) {
@@ -544,6 +564,44 @@ status_t EventHub::mapKey(int32_t deviceId,
         *outKeycode = 0;
         *outFlags = 0;
         *outMetaState = metaState;
+    }
+
+    // PICO: headset volume keys (qpnp_pon / gpio-keys) act as HOME (volume down) and
+    // DEFINE_CONFIRM (volume up) when no custom volume-key function is configured and
+    // either persist.pxr.vol_key_status is set, or no controller is connected and the
+    // active input device (pvr.active.input_device) is not 2.
+    if (device && (*outKeycode == AKEYCODE_VOLUME_UP || *outKeycode == AKEYCODE_VOLUME_DOWN)
+            && (!strcmp(device->identifier.name.c_str(), "qpnp_pon")
+                    || !strcmp(device->identifier.name.c_str(), "gpio-keys"))
+            && property_get_int32("persist.pxr.bconfig.vol_key_custom_function", 0) == 0) {
+        bool remap = false;
+        if (property_get_int32("persist.pxr.vol_key_status", 0) != 0) {
+            remap = true;
+        } else if (property_get_int32("pvr.active.input_device", -1) != 2) {
+            // controller_status_t from libstationclient: two controllers, 0x30 bytes each,
+            // connection state first. 0 and 2 both count as "not connected".
+            struct PicoControllerStatus {
+                int32_t connectionState;
+                uint8_t reserved[0x2c];
+            } controllers[2];
+            memset(controllers, 0, sizeof(controllers));
+            if (!mGetControllerStatus
+                    || mGetControllerStatus(mStationClient, controllers) != 0) {
+                ALOGI("GetControllerStatus FAILED");
+            } else if ((controllers[0].connectionState | 2) == 2
+                    && (controllers[1].connectionState | 2) == 2) {
+                remap = true;
+            }
+        }
+        if (remap) {
+            if (*outKeycode == AKEYCODE_VOLUME_DOWN) {
+                *outKeycode = AKEYCODE_HOME;
+                ALOGI("convert AKEYCODE_VOLUME_DOWN to AKEYCODE_HOME");
+            } else {
+                *outKeycode = AKEYCODE_DEFINE_CONFIRM;
+                ALOGI("convert AKEYCODE_VOLUME_UP to AKEYCODE_DEFINE_CONFIRM");
+            }
+        }
     }
 
     return status;
