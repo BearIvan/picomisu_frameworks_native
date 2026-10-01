@@ -205,7 +205,9 @@ sp<Layer> MonitoredProducer::getLayer() const {
     return mLayer.promote();
 }
 
-SurfaceClient* MonitoredProducer::getSurfaceClient() {
+// Factory 0xc4178 keeps this as an out-of-line function that BufferQueueLayer::getSurfaceClient
+// tail-calls; ThinLTO would otherwise import and inline it.
+__attribute__((noinline)) SurfaceClient* MonitoredProducer::getSurfaceClient() {
     return &mPicoClient;
 }
 
