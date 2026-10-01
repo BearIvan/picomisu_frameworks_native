@@ -31,6 +31,7 @@
 #include "LayerHistory.h"
 #include "RefreshRateConfigs.h"
 #include "SchedulerUtils.h"
+#include "VsyncRecord.h"
 
 namespace android {
 

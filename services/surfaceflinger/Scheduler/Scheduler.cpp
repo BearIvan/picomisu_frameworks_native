@@ -295,7 +295,12 @@ void Scheduler::setRefreshSkipCount(int count) {
 
 void Scheduler::setVsyncPeriod(const nsecs_t period, bool force_resync) {
     std::lock_guard<std::mutex> lock(mHWVsyncLock);
-    mPrimaryDispSync->setPeriod(period);
+    {
+        // PICO (factory 0xd4864): the period of the requested refresh rate wins.
+        VsyncRecord& record = VsyncRecord::getInstance();
+        std::lock_guard<std::mutex> recordLock(record.mutex);
+        mPrimaryDispSync->setPeriod(record.period != 0 ? record.period : period);
+    }
 
     if (!mPrimaryHWVsyncEnabled || force_resync) {
         mPrimaryDispSync->beginResync();

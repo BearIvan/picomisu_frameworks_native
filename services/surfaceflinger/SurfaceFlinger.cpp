@@ -1228,6 +1228,18 @@ void SurfaceFlinger::setDesiredActiveConfig(const ActiveConfigInfo& info) {
     if (!mDesiredActiveConfigChanged) {
         // This will trigger HWC refresh without resetting the idle timer.
         repaintEverythingForHWC();
+        {
+            // PICO (factory 0xdf298): remember the vsync period of the requested config for
+            // Scheduler::setVsyncPeriod.
+            VsyncRecord& record = VsyncRecord::getInstance();
+            std::lock_guard<std::mutex> recordLock(record.mutex);
+            const auto refreshRate = mRefreshRateConfigs.getRefreshRate(
+                    static_cast<int>(mDesiredActiveConfig.configId));
+            if (refreshRate) {
+                record.period =
+                        static_cast<nsecs_t>(1e9 / static_cast<double>(refreshRate->fps));
+            }
+        }
         // Start receiving vsync samples now, so that we can detect a period
         // switch.
         mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
