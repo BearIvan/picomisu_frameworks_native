@@ -33,34 +33,37 @@
 namespace android {
 namespace {
 constexpr nsecs_t kOperationGap = 300000000;
+// The factory file defines these two static descriptors (_GLOBAL__sub_I_SurfaceMonitor.cpp).
+// The first one is not used by any SurfaceMonitor function.
+[[maybe_unused]] const String16 kSurfaceComposerDescriptor("android.ui.ISurfaceComposer");
 const String16 kTransferDescriptor("com.android.internal.app.ITransferServer");
-const String16 kSysTransDescriptor("com.android.internal.app.ISysTransServer");
 }
 
 SurfaceMonitor::SurfaceMonitor()
       : mLegacyWord(0), mProcessState(1), mCallingPid(-1), mUpdating(false) {
     if (property_get_int32("sys.boot_completed", 0) == 0) return;
-    {
-        const int monitor = property_get_int32("persist.sys.monitor", 0);
-        char buildType[PROPERTY_VALUE_MAX];
-        property_get("ro.build.type", buildType, "user");
-        if (ProcessState::self()->getDriverName() != String8("/dev/vndbinder") &&
-                ((monitor & 1) || std::memcmp(buildType, "userdebug", 10) == 0)) {
-            // The factory uses the blocking getService(); these PICO report services are not
-            // on the Source image, and getService() then waits about five seconds on every
-            // layer and Surface creation. checkService() returns immediately.
-            const sp<IServiceManager> manager = defaultServiceManager();
-            if (manager) mTransfer = manager->checkService(String16("transferserver"));
-            const sp<IServiceManager> sysManager = defaultServiceManager();
-            if (sysManager) mSysTrans = sysManager->checkService(String16("systransserver"));
+    const int monitor = property_get_int32("persist.sys.monitor", 0);
+    char buildType[PROPERTY_VALUE_MAX];
+    property_get("ro.build.type", buildType, "");
+    if (std::strcmp(ProcessState::self()->getDriverName().string(), "/dev/vndbinder") != 0 &&
+            ((monitor & 1) || std::memcmp(buildType, "userdebug", 10) == 0)) {
+        // The factory uses the blocking getService(); these PICO report services are not
+        // on the Source image, and getService() then waits about five seconds on every
+        // layer and Surface creation. checkService() returns immediately.
+        const sp<IServiceManager> manager = defaultServiceManager();
+        if (manager) mTransfer = manager->checkService(String16("transferserver"));
+        const sp<IServiceManager> sysManager = defaultServiceManager();
+        if (sysManager) mSysTrans = sysManager->checkService(String16("systransserver"));
+        if (mTransfer) {
+            __android_log_print(ANDROID_LOG_DEBUG, nullptr, "SurfaceMonitor init completed!");
         } else {
-            __android_log_print(ANDROID_LOG_DEBUG, nullptr, "SurfaceMonitor closed!");
+            __android_log_print(ANDROID_LOG_ERROR, nullptr,
+                                "SurfaceMonitor get transfer service failed!");
         }
-    }
-    if (mTransfer) {
-        __android_log_print(ANDROID_LOG_DEBUG, nullptr, "SurfaceMonitor init completed!");
     } else {
-        __android_log_print(ANDROID_LOG_ERROR, nullptr, "SurfaceMonitor get transfer service failed!");
+        // Factory: the closed path logs only this line.
+        mTransfer.clear();
+        __android_log_print(ANDROID_LOG_DEBUG, nullptr, "SurfaceMonitor closed!");
     }
     loadConfig();
     updateCurrentDisplayFps(mModeCount - 1, String8("init"));
@@ -137,7 +140,7 @@ void SurfaceMonitor::initParameter() {
     mParameterLimit = 3.0f;
     if (!mSysTrans) return;
     Parcel data, reply;
-    data.writeInterfaceToken(kSysTransDescriptor);
+    data.writeInterfaceToken(String16("com.android.internal.app.ISysTransServer"));
     mSysTrans->transact(4, data, &reply, 0);
     reply.readExceptionCode();
     std::vector<int32_t> parameters;
@@ -150,7 +153,7 @@ void SurfaceMonitor::initParameter() {
 
 void SurfaceMonitor::getProcComm(int pid, char* name) {
     char path[128];
-    std::snprintf(path, sizeof(path), "/proc/%d/comm", pid);
+    std::sprintf(path, "/proc/%d/comm", pid);
     FILE* file = std::fopen(path, "r");
     if (file) {
         std::fgets(name, 128, file);
@@ -319,7 +322,7 @@ void SurfaceMonitor::reportFps(double fps, const String8& name, nsecs_t duration
 void SurfaceMonitor::requestChangeDisplayFps(int index) {
     if (!mSysTrans) return;
     Parcel data, reply;
-    data.writeInterfaceToken(kSysTransDescriptor);
+    data.writeInterfaceToken(String16("com.android.internal.app.ISysTransServer"));
     data.writeInt32(mCallingPid);
     data.writeInt32(index);
     data.writeInt32(1);
