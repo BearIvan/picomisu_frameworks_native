@@ -1277,6 +1277,15 @@ status_t BufferQueueProducer::queueBuffer(int slot,
         VALIDATE_CONSISTENCY();
     } // Autolock scope
 
+    // The factory reports the dropped PICO buffer right after the queue mutex is
+    // released, before the GraphicBuffer clear below and before the callback-ticket
+    // wait and the consumer frame callback, with neither mutex held. The payload is
+    // NO_FENCE, not the old acquire fence.
+    if (droppedBufferListener != nullptr) {
+        droppedBufferListener->onBufferReleasedWithFence(Fence::NO_FENCE,
+                                                         droppedBufferId, true);
+    }
+
     // It is okay not to clear the GraphicBuffer when the consumer is SurfaceFlinger because
     // it is guaranteed that the BufferQueue is inside SurfaceFlinger's process and
     // there will be no Binder call
@@ -1311,13 +1320,6 @@ status_t BufferQueueProducer::queueBuffer(int slot,
 
         ++mCurrentCallbackTicket;
         mCallbackCondition.notify_all();
-    }
-
-    // Factory sends this after the consumer frame callback with neither queue
-    // nor callback mutex held. The payload is NO_FENCE, not the old acquire fence.
-    if (droppedBufferListener != nullptr) {
-        droppedBufferListener->onBufferReleasedWithFence(Fence::NO_FENCE,
-                                                         droppedBufferId, true);
     }
 
     // PICO keeps the reference through the listener callback, then
