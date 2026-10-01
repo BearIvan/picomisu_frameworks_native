@@ -15,6 +15,7 @@
  */
 
 #include "egl_layers.h"
+#include "egl_pico_layer.h"
 
 #include <EGL/egl.h>
 #include <android-base/file.h>
@@ -143,6 +144,14 @@ LayerLoader& LayerLoader::getInstance() {
     // This function is mutex protected in egl_init_drivers_locked and eglGetProcAddressImpl
     static LayerLoader layer_loader;
 
+    // PICO: the built-in PICO GLES layer always comes first.
+    if (!layer_loader.pico_layer_loaded_) {
+        layer_loader.layer_init_.push_back(PicoLayerInit);
+        layer_loader.layer_setup_.push_back(PicoLayerSetup);
+        layer_loader.pico_layer_loaded_ = true;
+        ALOGI("LoadPicoLayer");
+    }
+
     if (!layer_loader.layers_loaded_) layer_loader.LoadLayers();
 
     return layer_loader;
@@ -265,31 +274,41 @@ void LayerLoader::InitLayers(egl_connection_t* cnx) {
         return;
     }
 
-    // Include the driver in layer_functions
-    layer_functions.resize(layer_setup_.size() + 1);
-
-    // Walk through the initial lists and create layer_functions[0]
     int func_idx = 0;
     char const* const* entries;
     EGLFuncPointer* curr;
 
-    entries = platform_names;
-    curr = reinterpret_cast<EGLFuncPointer*>(&cnx->platform);
-    SetupFuncMaps(layer_functions[0], entries, curr, func_idx);
-    ALOGV("InitLayers: func_idx after platform_names: %i", func_idx);
+    unsigned first_layer;
+    if (pico_layer_initialized_) {
+        // PICO: layer_functions[0] (driver) and [1] (after the PICO layer) come from
+        // InitPicoLayer; the debug layers are stacked on top of the PICO layer. The factory sizes
+        // the table with one spare entry, as here.
+        layer_functions.resize(layer_setup_.size() + 2);
+        first_layer = 1;
+    } else {
+        // Include the driver in layer_functions
+        layer_functions.resize(layer_setup_.size() + 1);
 
-    entries = egl_names;
-    curr = reinterpret_cast<EGLFuncPointer*>(&cnx->egl);
-    SetupFuncMaps(layer_functions[0], entries, curr, func_idx);
-    ALOGV("InitLayers: func_idx after egl_names: %i", func_idx);
+        // Walk through the initial lists and create layer_functions[0]
+        entries = platform_names;
+        curr = reinterpret_cast<EGLFuncPointer*>(&cnx->platform);
+        SetupFuncMaps(layer_functions[0], entries, curr, func_idx);
+        ALOGV("InitLayers: func_idx after platform_names: %i", func_idx);
 
-    entries = gl_names;
-    curr = reinterpret_cast<EGLFuncPointer*>(&cnx->hooks[egl_connection_t::GLESv2_INDEX]->gl);
-    SetupFuncMaps(layer_functions[0], entries, curr, func_idx);
-    ALOGV("InitLayers: func_idx after gl_names: %i", func_idx);
+        entries = egl_names;
+        curr = reinterpret_cast<EGLFuncPointer*>(&cnx->egl);
+        SetupFuncMaps(layer_functions[0], entries, curr, func_idx);
+        ALOGV("InitLayers: func_idx after egl_names: %i", func_idx);
+
+        entries = gl_names;
+        curr = reinterpret_cast<EGLFuncPointer*>(&cnx->hooks[egl_connection_t::GLESv2_INDEX]->gl);
+        SetupFuncMaps(layer_functions[0], entries, curr, func_idx);
+        ALOGV("InitLayers: func_idx after gl_names: %i", func_idx);
+        first_layer = 0;
+    }
 
     // Walk through each layer's entry points per API, starting just above the driver
-    for (current_layer_ = 0; current_layer_ < layer_setup_.size(); current_layer_++) {
+    for (current_layer_ = first_layer; current_layer_ < layer_setup_.size(); current_layer_++) {
         // Init the layer with a key that points to layer just below it
         layer_init_[current_layer_](reinterpret_cast<void*>(&layer_functions[current_layer_]),
                                     reinterpret_cast<PFNEGLGETNEXTLAYERPROCADDRESSPROC>(
@@ -327,6 +346,61 @@ void LayerLoader::InitLayers(egl_connection_t* cnx) {
 
     // We only want to apply layers once
     initialized_ = true;
+}
+
+// PICO: builds layer_functions[0] (driver) and layer_functions[1] (after the PICO layer, which is
+// entry 0 of layer_init_ / layer_setup_) and routes the dispatch tables through the PICO layer.
+// It runs before InitLayers, so debug layers, if any, are stacked on top of it.
+void LayerLoader::InitPicoLayer(egl_connection_t* cnx) {
+    if (!pico_layer_loaded_) return;
+
+    if (pico_layer_initialized_) return;
+
+    if (layer_setup_.empty()) {
+        initialized_ = true;
+        return;
+    }
+
+    // The driver and the PICO layer
+    layer_functions.resize(2);
+
+    int func_idx = 0;
+    char const* const* entries;
+    EGLFuncPointer* curr;
+
+    entries = platform_names;
+    curr = reinterpret_cast<EGLFuncPointer*>(&cnx->platform);
+    SetupFuncMaps(layer_functions[0], entries, curr, func_idx);
+
+    entries = egl_names;
+    curr = reinterpret_cast<EGLFuncPointer*>(&cnx->egl);
+    SetupFuncMaps(layer_functions[0], entries, curr, func_idx);
+
+    entries = gl_names;
+    curr = reinterpret_cast<EGLFuncPointer*>(&cnx->hooks[egl_connection_t::GLESv2_INDEX]->gl);
+    SetupFuncMaps(layer_functions[0], entries, curr, func_idx);
+
+    func_idx = 0;
+    layer_init_[0](reinterpret_cast<void*>(&layer_functions[0]),
+                   reinterpret_cast<PFNEGLGETNEXTLAYERPROCADDRESSPROC>(getNextLayerProcAddress));
+
+    entries = platform_names;
+    curr = reinterpret_cast<EGLFuncPointer*>(&cnx->platform);
+    LayerPlatformEntries(layer_setup_[0], curr, entries);
+    SetupFuncMaps(layer_functions[1], entries, curr, func_idx);
+
+    entries = egl_names;
+    curr = reinterpret_cast<EGLFuncPointer*>(&cnx->egl);
+    LayerDriverEntries(layer_setup_[0], curr, entries);
+    SetupFuncMaps(layer_functions[1], entries, curr, func_idx);
+
+    entries = gl_names;
+    curr = reinterpret_cast<EGLFuncPointer*>(&cnx->hooks[egl_connection_t::GLESv2_INDEX]->gl);
+    LayerDriverEntries(layer_setup_[0], curr, entries);
+    SetupFuncMaps(layer_functions[1], entries, curr, func_idx);
+
+    ALOGD("Pico layer init complete");
+    pico_layer_initialized_ = true;
 }
 
 void LayerLoader::LoadLayers() {

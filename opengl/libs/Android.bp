@@ -132,6 +132,20 @@ cc_library_static {
     export_include_dirs: ["EGL"],
 }
 
+// PICO: the built-in PICO GLES layer (texture redirect, see EGL/egl_pico_layer.cpp).
+cc_library_static {
+    name: "libEGL_pico_layer",
+    defaults: ["egl_libs_defaults"],
+    srcs: [
+        "EGL/pico_layer/gl_funcs.cpp",
+        "EGL/pico_layer/HookApi.cpp",
+        "EGL/pico_layer/Context.cpp",
+        "EGL/pico_layer/GLES.cpp",
+        "EGL/pico_layer/Framebuffer.cpp",
+        "EGL/pico_layer/Object.cpp",
+    ],
+}
+
 cc_library_shared {
     name: "libEGL",
     defaults: ["egl_libs_defaults"],
@@ -146,6 +160,7 @@ cc_library_shared {
         "EGL/egl_platform_entries.cpp",
         "EGL/Loader.cpp",
         "EGL/egl_angle_platform.cpp",
+        "EGL/egl_pico_layer.cpp",
     ],
     shared_libs: [
         "libvndksupport",
@@ -161,6 +176,7 @@ cc_library_shared {
     static_libs: [
         "libEGL_getProcAddress",
         "libEGL_blobCache",
+        "libEGL_pico_layer",
     ],
     ldflags: ["-Wl,--exclude-libs=ALL"],
     export_include_dirs: ["EGL/include"],

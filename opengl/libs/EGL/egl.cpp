@@ -196,6 +196,8 @@ static EGLBoolean egl_init_drivers_locked() {
         // Layers can be enabled long after the drivers have been loaded.
         // They will only be initialized once.
         LayerLoader& layer_loader(LayerLoader::getInstance());
+        // PICO: the built-in PICO GLES layer goes first.
+        layer_loader.InitPicoLayer(cnx);
         layer_loader.InitLayers(cnx);
     }
 

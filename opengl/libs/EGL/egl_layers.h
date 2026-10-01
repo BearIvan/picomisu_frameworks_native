@@ -41,6 +41,8 @@ public:
 
     void LoadLayers();
     void InitLayers(egl_connection_t*);
+    // PICO: installs the built-in PICO GLES layer (layer 0) ahead of the debug layers.
+    void InitPicoLayer(egl_connection_t*);
     void LayerPlatformEntries(layer_setup_func layer_setup, EGLFuncPointer*, char const* const*);
     void LayerDriverEntries(layer_setup_func layer_setup, EGLFuncPointer*, char const* const*);
     bool Initialized();
@@ -54,9 +56,16 @@ public:
     std::vector<layer_setup_func> layer_setup_;
 
 private:
-    LayerLoader() : layers_loaded_(false), initialized_(false), current_layer_(0){};
+    LayerLoader()
+          : layers_loaded_(false),
+            pico_layer_loaded_(false),
+            initialized_(false),
+            pico_layer_initialized_(false),
+            current_layer_(0){};
     bool layers_loaded_;
+    bool pico_layer_loaded_;
     bool initialized_;
+    bool pico_layer_initialized_;
     unsigned current_layer_;
 };
 
