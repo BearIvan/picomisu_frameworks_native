@@ -92,6 +92,8 @@ public:
     virtual status_t postMessage(const sp<MessageBase>& message, nsecs_t reltime = 0) = 0;
     virtual void invalidate() = 0;
     virtual void refresh() = 0;
+    // PICO: sends INVALIDATE at every 3rd VSYNC while the cast path is active.
+    virtual void screencast() = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -137,6 +139,9 @@ public:
 
     // sends REFRESH message at next VSYNC
     void refresh() override;
+
+    // PICO: sends INVALIDATE message at every 3rd VSYNC (cast)
+    void screencast() override;
 };
 
 // ---------------------------------------------------------------------------

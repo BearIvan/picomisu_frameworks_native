@@ -40,6 +40,7 @@ public:
                  status_t(const sp<android::EventThreadConnection> &));
     MOCK_METHOD2(setVsyncRate, void(uint32_t, const sp<android::EventThreadConnection> &));
     MOCK_METHOD1(requestNextVsync, void(const sp<android::EventThreadConnection> &));
+    MOCK_METHOD2(requestPeriodNVsync, void(const sp<android::EventThreadConnection> &, int));
     MOCK_METHOD1(pauseVsyncCallback, void(bool));
 };
 

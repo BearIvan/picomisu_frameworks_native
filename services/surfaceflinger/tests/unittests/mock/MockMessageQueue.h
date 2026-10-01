@@ -36,6 +36,7 @@ public:
     MOCK_METHOD2(postMessage, status_t(const sp<MessageBase>&, nsecs_t));
     MOCK_METHOD0(invalidate, void());
     MOCK_METHOD0(refresh, void());
+    MOCK_METHOD0(screencast, void());
 };
 
 } // namespace mock

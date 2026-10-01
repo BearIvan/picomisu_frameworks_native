@@ -154,6 +154,11 @@ void MessageQueue::refresh() {
     mHandler->dispatchRefresh();
 }
 
+void MessageQueue::screencast() {
+    // Factory 0xd1ad0.
+    mEvents->requestCastVsync();
+}
+
 int MessageQueue::cb_eventReceiver(int fd, int events, void* data) {
     MessageQueue* queue = reinterpret_cast<MessageQueue*>(data);
     return queue->eventReceiver(fd, events);

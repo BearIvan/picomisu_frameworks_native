@@ -57,6 +57,8 @@ std::string toString(VSyncRequest request) {
             return "VSyncRequest::None";
         case VSyncRequest::Single:
             return "VSyncRequest::Single";
+        case VSyncRequest::PeriodicN:
+            return "VSyncRequest::PeriodicN";
         default:
             return StringPrintf("VSyncRequest::Periodic{period=%d}", vsyncPeriod(request));
     }
@@ -142,6 +144,12 @@ status_t EventThreadConnection::setVsyncRate(uint32_t rate) {
 void EventThreadConnection::requestNextVsync() {
     ATRACE_NAME("requestNextVsync");
     mEventThread->requestNextVsync(this);
+}
+
+void EventThreadConnection::requestCastVsync() {
+    // Factory 0xcbc14.
+    ATRACE_NAME("requestCastVsync");
+    mEventThread->requestPeriodNVsync(this, 3);
 }
 
 status_t EventThreadConnection::postEvent(const DisplayEventReceiver::Event& event) {
@@ -270,8 +278,25 @@ void EventThread::requestNextVsync(const sp<EventThreadConnection>& connection) 
 
     std::lock_guard<std::mutex> lock(mMutex);
 
-    if (connection->vsyncRequest == VSyncRequest::None) {
+    // PICO (factory 0xcc92c): a pending every-Nth-vsync request is replaced as well.
+    if (connection->vsyncRequest == VSyncRequest::None ||
+        connection->vsyncRequest == VSyncRequest::PeriodicN) {
         connection->vsyncRequest = VSyncRequest::Single;
+        mCondition.notify_all();
+    }
+}
+
+void EventThread::requestPeriodNVsync(const sp<EventThreadConnection>& connection, int periodN) {
+    // Factory 0xcc9a4.
+    if (connection->resyncCallback) {
+        connection->resyncCallback();
+    }
+
+    std::lock_guard<std::mutex> lock(mMutex);
+
+    if (connection->vsyncRequest != VSyncRequest::PeriodicN) {
+        connection->vsyncRequest = VSyncRequest::PeriodicN;
+        connection->periodN = periodN;
         mCondition.notify_all();
     }
 }
@@ -444,6 +469,13 @@ bool EventThread::shouldConsumeEvent(const DisplayEventReceiver::Event& event,
                     return true;
                 case VSyncRequest::Periodic:
                     return true;
+                case VSyncRequest::PeriodicN: {
+                    // PICO (factory EventThread thread 0xcd7ac).
+                    const bool consume = connection->periodN >= 1 &&
+                            event.vsync.count % static_cast<uint32_t>(connection->periodN) == 0;
+                    ATRACE_NAME(consume ? "periodicN yes" : "periodicN no");
+                    return consume;
+                }
                 default:
                     return event.vsync.count % vsyncPeriod(connection->vsyncRequest) == 0;
             }

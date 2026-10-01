@@ -50,6 +50,9 @@ enum class VSyncRequest {
     None = -1,
     Single = 0,
     Periodic = 1,
+    // PICO: every Nth vsync, N in EventThreadConnection::periodN (factory value 2, so a
+    // setVsyncRate(2) request also lands here, as on the factory).
+    PeriodicN = 2,
     // Subsequent values are periods.
 };
 
@@ -78,6 +81,8 @@ public:
     status_t stealReceiveChannel(gui::BitTube* outChannel) override;
     status_t setVsyncRate(uint32_t rate) override;
     void requestNextVsync() override; // asynchronous
+    // PICO: vsync for the cast (screen projection) path, every 3rd vsync.
+    void requestCastVsync();
 
     // Called in response to requestNextVsync.
     const ResyncCallback resyncCallback;
@@ -89,6 +94,10 @@ private:
     virtual void onFirstRef();
     EventThread* const mEventThread;
     gui::BitTube mChannel;
+
+public:
+    // PICO: N of VSyncRequest::PeriodicN, -1 until requested (factory +0x80).
+    int32_t periodN = -1;
 };
 
 class EventThread {
@@ -118,6 +127,9 @@ public:
     virtual void setVsyncRate(uint32_t rate, const sp<EventThreadConnection>& connection) = 0;
     // Requests the next vsync. If resetIdleTimer is set to true, it resets the idle timer.
     virtual void requestNextVsync(const sp<EventThreadConnection>& connection) = 0;
+    // PICO: requests every periodN-th vsync until the next requestNextVsync().
+    virtual void requestPeriodNVsync(const sp<EventThreadConnection>& connection,
+                                     int periodN) = 0;
 };
 
 namespace impl {
@@ -137,6 +149,7 @@ public:
     status_t registerDisplayEventConnection(const sp<EventThreadConnection>& connection) override;
     void setVsyncRate(uint32_t rate, const sp<EventThreadConnection>& connection) override;
     void requestNextVsync(const sp<EventThreadConnection>& connection) override;
+    void requestPeriodNVsync(const sp<EventThreadConnection>& connection, int periodN) override;
 
     // called before the screen is turned off from main thread
     void onScreenReleased() override;
