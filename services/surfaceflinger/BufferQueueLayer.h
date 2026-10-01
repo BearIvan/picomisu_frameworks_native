@@ -77,6 +77,8 @@ private:
     const HdrMetadata& getDrawingHdrMetadata() const override;
     int getDrawingApi() const override;
     PixelFormat getPixelFormat() const override;
+    // PICO: sends the level to the MonitoredProducer (IGraphicBufferProducer code 1110).
+    void notifyLayerFpsLevel(int level) override;
     // PICO: the frame history of this layer's MonitoredProducer.
     SurfaceClient* getSurfaceClient() override;
 

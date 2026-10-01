@@ -218,6 +218,16 @@ PixelFormat BufferQueueLayer::getPixelFormat() const {
     return mFormat;
 }
 
+void BufferQueueLayer::notifyLayerFpsLevel(int level) {
+    // Factory 0x86f20: a local transaction to the MonitoredProducer, which passes the level to
+    // its SurfaceMonitor (MonitoredProducer::onTransact, code 1110).
+    Parcel data;
+    Parcel reply;
+    data.writeInterfaceToken(String16("android.gui.IGraphicBufferProducer"));
+    data.writeInt32(level);
+    IInterface::asBinder(mProducer)->transact(1110, data, &reply, 0);
+}
+
 SurfaceClient* BufferQueueLayer::getSurfaceClient() {
     // Factory 0x87044: mProducer is always the MonitoredProducer created in onFirstRef().
     return static_cast<MonitoredProducer*>(mProducer.get())->getSurfaceClient();
@@ -637,6 +647,9 @@ void BufferQueueLayer::onFirstRef() {
     if (mFlinger->mUseLayerExt && mFlinger->mLayerExt) {
         mLayerType = mFlinger->mLayerExt->getLayerClass(mName.string());
     }
+
+    // PICO (factory 0x86d98): every visible buffer layer learns the active display config.
+    mFlinger->notifyLayerFpsLevel();
 }
 
 status_t BufferQueueLayer::setDefaultBufferProperties(uint32_t w, uint32_t h, PixelFormat format) {

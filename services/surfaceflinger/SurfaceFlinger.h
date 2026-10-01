@@ -556,6 +556,9 @@ private:
     void signalTransaction();
     // Can only be called from the main thread or with mStateLock held
     void signalLayerUpdate();
+    // PICO: passes the upcoming active display config to the producers of all visible
+    // layers (Layer::notifyLayerFpsLevel).
+    void notifyLayerFpsLevel();
     void signalRefresh();
 
     using RefreshRateType = scheduler::RefreshRateConfigs::RefreshRateType;

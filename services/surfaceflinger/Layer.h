@@ -862,6 +862,9 @@ public:
 
     virtual void notifyAvailableFrames() {}
     virtual PixelFormat getPixelFormat() const { return PIXEL_FORMAT_NONE; }
+    // PICO: tells the layer's producer the active display config (factory
+    // Layer::notifyLayerFpsLevel, no-op for layers without a buffer queue).
+    virtual void notifyLayerFpsLevel(int /*level*/) {}
     // PICO: frame history of the layer's producer (MonitoredProducer), nullptr for layers
     // without a buffer queue (factory Layer::getSurfaceClient, last Layer virtual).
     virtual SurfaceClient* getSurfaceClient() { return nullptr; }

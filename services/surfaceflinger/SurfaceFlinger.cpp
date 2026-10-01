@@ -1729,6 +1729,17 @@ void SurfaceFlinger::signalLayerUpdate() {
     mEventQueue->invalidate();
 }
 
+void SurfaceFlinger::notifyLayerFpsLevel() {
+    // Factory 0xdfd3c.
+    const int level = mUpcomingActiveConfig.configId;
+    Mutex::Autolock lock(mStateLock);
+    mCurrentState.traverseInZOrder([&](Layer* layer) {
+        if (layer->isVisible()) {
+            layer->notifyLayerFpsLevel(level);
+        }
+    });
+}
+
 void SurfaceFlinger::signalRefresh() {
     mRefreshPending = true;
     mEventQueue->refresh();

@@ -217,7 +217,8 @@ status_t MonitoredProducer::onTransact(uint32_t code, const Parcel& data,
     if (code != 1110) return result;
     const int index = data.readInt32();
     if (const sp<Layer> layer = mLayer.promote()) {
-        mPicoMonitor.updateCurrentDisplayFps(index, layer->getName());
+        // Factory 0xc40f8: a new String8 from the layer name.
+        mPicoMonitor.updateCurrentDisplayFps(index, String8(layer->getName().string()));
     }
     return NO_ERROR;
 }
