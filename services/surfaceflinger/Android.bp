@@ -168,6 +168,7 @@ filegroup {
         "SurfaceFlinger.cpp",
         "PicoSingleLayerComposition.cpp",
         "SurfaceInterceptor.cpp",
+        "SysDisplayClient.cpp",
         "SurfaceTracing.cpp",
         "TimeStats/TimeStats.cpp",
         "TransactionCompletedThread.cpp",

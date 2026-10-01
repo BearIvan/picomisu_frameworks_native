@@ -42,6 +42,7 @@
 
 #include "DisplayHardware/DisplayIdentification.h"
 #include "RenderArea.h"
+#include "SysDisplayClient.h"
 
 namespace android {
 
@@ -91,6 +92,8 @@ public:
     // (factory DisplayDevice +0x163d). Cleared when the display is removed.
     bool hasPxrLayer() const { return mHasPxrLayer; }
     void setHasPxrLayer(bool hasPxrLayer) { mHasPxrLayer = hasPxrLayer; }
+    // PICO: composed producer frames of this display for the PICO system monitor.
+    SysDisplayClient& getSysDisplayClient() { return mSysDisplayClient; }
 
     // isSecure indicates whether this display can be trusted to display
     // secure surfaces.
@@ -231,6 +234,8 @@ private:
     // For animation hint
     bool mIsAnimating;
     bool mIsDisplayBuiltInType;
+    // PICO (factory +0x118)
+    SysDisplayClient mSysDisplayClient;
     uint32_t mDisplayFlags = 0;
     bool mHasPxrLayer = false;
 };

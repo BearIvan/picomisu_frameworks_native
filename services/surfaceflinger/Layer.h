@@ -65,6 +65,7 @@ class Client;
 class Colorizer;
 class DisplayDevice;
 class GraphicBuffer;
+class SurfaceClient;
 class SurfaceFlinger;
 class LayerDebugInfo;
 
@@ -593,10 +594,6 @@ public:
 
     virtual bool isBufferLatched() const { return false; }
 
-    // PICO: the factory declares getAutoRefresh() on Layer (false for non-buffer layers) so
-    // that SurfaceFlinger and MonitoredProducer can query any layer.
-    virtual bool getAutoRefresh() const { return false; }
-
     /*
      * Remove relative z for the layer if its relative parent is not part of the
      * provided layer tree.
@@ -633,6 +630,11 @@ public:
      * Returns if a frame is ready
      */
     virtual bool hasReadyFrame() const { return false; }
+
+    // PICO: the factory declares getAutoRefresh() on Layer (false for non-buffer layers) so
+    // that SurfaceFlinger and MonitoredProducer can query any layer. Factory vtable order:
+    // latchBuffer, getLatchSlot, isBufferLatched, hasReadyFrame, getAutoRefresh.
+    virtual bool getAutoRefresh() const { return false; }
 
     virtual int32_t getQueuedFrameCount() const { return 0; }
 
@@ -860,6 +862,9 @@ public:
 
     virtual void notifyAvailableFrames() {}
     virtual PixelFormat getPixelFormat() const { return PIXEL_FORMAT_NONE; }
+    // PICO: frame history of the layer's producer (MonitoredProducer), nullptr for layers
+    // without a buffer queue (factory Layer::getSurfaceClient, last Layer virtual).
+    virtual SurfaceClient* getSurfaceClient() { return nullptr; }
     bool getPremultipledAlpha() const;
 
     bool mPendingHWCDestroy{false};

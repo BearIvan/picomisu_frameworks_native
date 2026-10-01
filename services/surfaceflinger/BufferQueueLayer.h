@@ -77,6 +77,8 @@ private:
     const HdrMetadata& getDrawingHdrMetadata() const override;
     int getDrawingApi() const override;
     PixelFormat getPixelFormat() const override;
+    // PICO: the frame history of this layer's MonitoredProducer.
+    SurfaceClient* getSurfaceClient() override;
 
     uint64_t getFrameNumber() const override;
 

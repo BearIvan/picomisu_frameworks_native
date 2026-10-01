@@ -24,15 +24,20 @@
 
 namespace android {
 
+// PICO: one recorded producer frame (factory android::SurfaceClientItem, 0xa8 bytes). The
+// compositor copies it into its per-display history (SysDisplayClient) and hands a vector of
+// them to the PICO system monitor (mtp::SysMtpClient::addDisplayFrame).
+struct SurfaceClientItem {
+    char name[128];
+    pid_t callingTid;
+    int32_t frameNumber;
+    nsecs_t timestamps[4];
+};
+
 // PICO client-side frame history consumed by the factory compositor.
 class SurfaceClient {
 public:
-    struct Frame {
-        char name[128];
-        pid_t callingTid;
-        int32_t frameNumber;
-        nsecs_t timestamps[4];
-    };
+    using Frame = SurfaceClientItem;
 
     SurfaceClient();
     ~SurfaceClient();

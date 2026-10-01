@@ -92,6 +92,7 @@
 #include "StartPropertySetThread.h"
 #include "SurfaceFlinger.h"
 #include "PicoSingleLayerComposition.h"
+#include "PicoSysMtpClient.h"
 #include "SurfaceInterceptor.h"
 
 #include "DisplayHardware/ComposerHal.h"
@@ -1765,6 +1766,8 @@ nsecs_t SurfaceFlinger::getVsyncPeriod() const {
 void SurfaceFlinger::onVsyncReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId,
                                      int64_t timestamp) {
     ATRACE_NAME("SF onVsync");
+    // PICO (factory 0xe17c8): every hardware vsync goes to the PICO system monitor.
+    pico::SysMtpClient::onVsync(timestamp);
 
     Mutex::Autolock lock(mStateLock);
     // Ignore any vsyncs from a previous hardware composer.
@@ -3126,6 +3129,11 @@ void SurfaceFlinger::doComposition(const sp<DisplayDevice>& displayDevice, bool 
         // transform the dirty region into this screen's coordinate space
         const Region dirtyRegion = display->getDirtyRegion(repaintEverything);
 
+        // PICO (factory 0xe6288): composition start times for the PICO system monitor.
+        SysDisplayClient& sysClient = displayDevice->getSysDisplayClient();
+        sysClient.mLastComposeTime = sysClient.mComposeTime;
+        sysClient.mComposeTime = systemTime(SYSTEM_TIME_MONOTONIC);
+
         // repaint the framebuffer (if needed)
         doDisplayComposition(displayDevice, dirtyRegion);
 
@@ -4150,7 +4158,16 @@ void SurfaceFlinger::doDisplayComposition(const sp<DisplayDevice>& displayDevice
     if (!doComposeSurfaces(displayDevice, Region::INVALID_REGION, &readyFence)) return;
 
     // swap buffers (presentation)
+    const nsecs_t queueStartTime = systemTime(SYSTEM_TIME_MONOTONIC);
     display->getRenderSurface()->queueBuffer(std::move(readyFence));
+
+    // PICO (factory handleMessageRefresh 0xe6370): report the composed frame and the producer
+    // frames it showed to the PICO system monitor.
+    SysDisplayClient& sysClient = displayDevice->getSysDisplayClient();
+    pico::SysMtpClient::addDisplayFrame(sysClient.getCurrentSurfaceBuffer(),
+                                        static_cast<int>(display->getState().layerStackId),
+                                        sysClient.mLastComposeTime, sysClient.mComposeTime,
+                                        queueStartTime, systemTime(SYSTEM_TIME_MONOTONIC));
 }
 
 bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
@@ -4231,6 +4248,9 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
         ALOGV("Layer: %s", layer->getName().string());
         ALOGV("  Composition type: %s", toString(layer->getCompositionType(displayDevice)).c_str());
         layers.push_back(layer->getName().string());
+        // PICO (factory 0xe9fb8): remember the producer frame this layer shows.
+        displayDevice->getSysDisplayClient().updateSurfaceFrame(layer->getSurfaceClient(),
+                                                                layer->getLatchSlot());
         if (!clip.isEmpty()) {
             switch (layer->getCompositionType(displayDevice)) {
                 case Hwc2::IComposerClient::Composition::CURSOR:
@@ -6497,7 +6517,8 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
     }
     // Numbers from 1000 to 1035 and 20000 are currently used for backdoors. The code
     // in onTransact verifies that the user is root, and has access to use SF.
-    if ((code >= 1000 && code <= 1035) || (code == 20000)) {
+    // PICO: 2002..2016 are the factory PICO system monitor codes (onTransact).
+    if ((code >= 1000 && code <= 1035) || (code == 20000) || (code >= 2002 && code <= 2016)) {
         ALOGV("Accessing SurfaceFlinger through backdoor code: %u", code);
         return OK;
     }
@@ -6516,6 +6537,13 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
     status_t err = BnSurfaceComposer::onTransact(code, data, reply, flags);
     if (err == UNKNOWN_TRANSACTION || err == PERMISSION_DENIED) {
         CHECK_INTERFACE(ISurfaceComposer, data, reply);
+        // PICO (factory 0xf76d8): any caller may ask the PICO system monitor to write its
+        // records; the other monitor codes below need the usual backdoor permission.
+        if (code == 2008) {
+            pico::SysMtpClient::sendTaskToWritePb();
+            pico::SysMtpClient::sendTaskToWritePtpPb();
+            return NO_ERROR;
+        }
         IPCThreadState* ipc = IPCThreadState::self();
         const int uid = ipc->getCallingUid();
         if (CC_UNLIKELY(uid != AID_SYSTEM
@@ -6854,6 +6882,75 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
               ALOGI("Debug: Set display = %llu, power mode = %d", (unsigned long long)disp, mode);
               setPowerMode(getPhysicalDisplayToken(disp), mode);
               return NO_ERROR;
+            }
+            // PICO: PICO system monitor (factory onTransact jump table 0x5217a). The
+            // arguments are read in the factory order and forwarded unchanged.
+            case 2002: {
+                const String8 a(data.readString16());
+                const String8 b(data.readString16());
+                const String8 c(data.readString16());
+                pico::SysMtpClient::setDeviceProp(a.string(), b.string(), c.string());
+                return NO_ERROR;
+            }
+            case 2003:
+                pico::SysMtpClient::shutDown();
+                return NO_ERROR;
+            case 2004:
+                pico::SysMtpClient::notifyDisplayRefresh(data.readInt32());
+                return NO_ERROR;
+            case 2005:
+            case 2007:
+            case 2016: {
+                const String8 name(data.readString16());
+                std::vector<int32_t> values;
+                data.readInt32Vector(&values);
+                if (code == 2005) {
+                    pico::SysMtpClient::notifyAutoDumpInfo(name.string(), values);
+                } else if (code == 2007) {
+                    pico::SysMtpClient::notifyCrashReportDumpInfo(name.string(), values);
+                } else {
+                    pico::SysMtpClient::notifyLayerDumpInfo(name.string(), values);
+                }
+                return NO_ERROR;
+            }
+            case 2006:
+                pico::SysMtpClient::setDailyDumpPerfettoCount(data.readInt32());
+                return NO_ERROR;
+            case 2009: {
+                const int a = data.readInt32();
+                const int b = data.readInt32();
+                const int c = data.readInt32();
+                pico::SysMtpClient::notifyBacklight(a, b, c);
+                return NO_ERROR;
+            }
+            case 2010:
+                pico::SysMtpClient::notifyLowPowerLevel(data.readInt32());
+                return NO_ERROR;
+            case 2011:
+                pico::SysMtpClient::updateTerribleJankScope(data.readInt32());
+                return NO_ERROR;
+            case 2012:
+                pico::SysMtpClient::updateCameraRefresh(data.readInt32());
+                return NO_ERROR;
+            case 2013: {
+                const String8 name(data.readString16());
+                const int value = data.readInt32();
+                pico::SysMtpClient::notifyVirtualDisplaySurfaceChanged(value, name.string());
+                return NO_ERROR;
+            }
+            case 2014: {
+                const String8 a(data.readString16());
+                const String8 b(data.readString16());
+                const int value = data.readInt32();
+                const int64_t time = data.readInt64();
+                pico::SysMtpClient::notifyLaunchPackageInfo(a.string(), b.string(), value, time);
+                return NO_ERROR;
+            }
+            case 2015: {
+                std::vector<int32_t> values;
+                data.readInt32Vector(&values);
+                pico::SysMtpClient::notifySchedInfoDumpInfo(values);
+                return NO_ERROR;
             }
         }
     }

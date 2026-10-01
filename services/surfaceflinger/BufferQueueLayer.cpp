@@ -27,6 +27,7 @@
 
 #include "BufferQueueLayer.h"
 #include "LayerRejecter.h"
+#include "MonitoredProducer.h"
 #include "SurfaceInterceptor.h"
 
 #include "TimeStats/TimeStats.h"
@@ -215,6 +216,11 @@ int BufferQueueLayer::getDrawingApi() const {
 
 PixelFormat BufferQueueLayer::getPixelFormat() const {
     return mFormat;
+}
+
+SurfaceClient* BufferQueueLayer::getSurfaceClient() {
+    // Factory 0x87044: mProducer is always the MonitoredProducer created in onFirstRef().
+    return static_cast<MonitoredProducer*>(mProducer.get())->getSurfaceClient();
 }
 
 uint64_t BufferQueueLayer::getFrameNumber() const {
