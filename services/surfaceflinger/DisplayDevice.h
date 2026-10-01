@@ -92,6 +92,12 @@ public:
     void setDisplayFlags(uint32_t flags) { mDisplayFlags = flags; }
     uint32_t getDisplayFlags() const { return mDisplayFlags; }
     bool usesPicoSingleLayer() const { return (mDisplayFlags & DisplayState::ePicoSingleLayer) != 0; }
+    bool isPicoAppDisplay() const { return (mDisplayFlags & DisplayState::ePicoAppDisplay) != 0; }
+    // PICO: a virtual 2D app display (isPicoAppDisplay) is only recomposed while this is set
+    // (factory +0x163c, initially true): set when one of its layers changed (handlePageFlip)
+    // or the display state changed, cleared after the display has been composed.
+    bool needsRefresh() const { return mNeedsRefresh; }
+    void setNeedsRefresh(bool needsRefresh) { mNeedsRefresh = needsRefresh; }
     // PICO: set once the VR runtime's PXR surface has been client-composed on this display
     // (factory DisplayDevice +0x163d). Cleared when the display is removed.
     bool hasPxrLayer() const { return mHasPxrLayer; }
@@ -245,6 +251,7 @@ private:
     // PICO (factory +0x118)
     SysDisplayClient mSysDisplayClient;
     uint32_t mDisplayFlags = 0;
+    bool mNeedsRefresh = true;
     bool mHasPxrLayer = false;
     bool mDualCast = false;
 };

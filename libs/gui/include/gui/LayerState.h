@@ -255,6 +255,8 @@ struct DisplayState {
 
     uint32_t width, height;
     uint32_t flags;
+    // PICO: 2D app panel display (DisplayInfo flag 1 << 15 in the framework).
+    static constexpr uint32_t ePicoAppDisplay = 1u << 0;
     static constexpr uint32_t ePicoSingleLayer = 1u << 20;
 
     status_t write(Parcel& output) const;

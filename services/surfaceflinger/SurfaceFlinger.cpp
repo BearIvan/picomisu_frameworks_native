@@ -2247,11 +2247,16 @@ void SurfaceFlinger::handleMessageRefresh() {
     rebuildLayerStacks();
     calculateWorkingSet();
     for (const auto& [token, display] : mDisplays) {
+        // PICO (factory 0xe6018): an unchanged virtual 2D app display is not composed.
+        if (!display->needsRefresh() && display->isVirtual() && display->isPicoAppDisplay()) {
+            continue;
+        }
         setDisplayElapseTime(display);
         beginFrame(display);
         prepareFrame(display);
         doDebugFlashRegions(display, repaintEverything);
         doComposition(display, repaintEverything);
+        display->setNeedsRefresh(false);
     }
 
     logLayerStats();
@@ -2499,6 +2504,30 @@ void SurfaceFlinger::logLayerStats() {
     }
 }
 
+// PICO (factory android::getAutoRefresh 0xeb8a4): whether the layer is in auto-refresh
+// (SINGLE_BUFFER) mode and may be refreshed without a new frame. Not while
+// debug.sf.ignore.autorefresh is set or while a virtual display shows layer stack 0 (screen
+// recording and cast keep the normal frame flow). `cast` reports whether a dual cast display
+// exists. As on the factory the displays are passed by value.
+static bool getAutoRefresh(const sp<const Layer>& layer,
+                           std::map<wp<IBinder>, sp<DisplayDevice>> displays, bool& cast) {
+    char value[PROPERTY_VALUE_MAX];
+    property_get("debug.sf.ignore.autorefresh", value, "0");
+    if (atoi(value)) {
+        return false;
+    }
+    cast = false;
+    for (const auto& [token, display] : displays) {
+        if (display->isDualCast()) {
+            cast = true;
+        }
+        if (display->isVirtual() && display->getCompositionDisplay()->getState().layerStackId == 0) {
+            return false;
+        }
+    }
+    return layer->getAutoRefresh();
+}
+
 void SurfaceFlinger::preComposition()
 {
     ATRACE_CALL();
@@ -2507,13 +2536,23 @@ void SurfaceFlinger::preComposition()
     mRefreshStartTime = systemTime(SYSTEM_TIME_MONOTONIC);
 
     bool needExtraInvalidate = false;
+    bool needCast = false;
     mDrawingState.traverseInZOrder([&](Layer* layer) {
         if (layer->onPreComposition(mRefreshStartTime)) {
-            needExtraInvalidate = true;
+            // PICO (factory preComposition lambda 0x1022ec): an auto-refresh layer needs no
+            // extra frame.
+            if (!getAutoRefresh(layer, mDisplays, needCast)) {
+                needExtraInvalidate = true;
+            }
         }
     });
 
-    if (needExtraInvalidate) {
+    // PICO (factory handleMessageRefresh 0xe5628): with a dual cast display the next
+    // composition follows the cast vsync (every 3rd vsync).
+    if (needCast) {
+        mScheduler->resetIdleTimer();
+        mEventQueue->screencast();
+    } else if (needExtraInvalidate) {
         signalLayerUpdate();
     }
 }
@@ -2828,6 +2867,12 @@ void SurfaceFlinger::rebuildLayerStacks() {
 
         for (const auto& pair : mDisplays) {
             const auto& displayDevice = pair.second;
+            // PICO (factory 0xe8a30): the layer stack of an unchanged virtual 2D app display
+            // is kept.
+            if (!displayDevice->needsRefresh() && displayDevice->isVirtual() &&
+                displayDevice->isPicoAppDisplay()) {
+                continue;
+            }
             auto display = displayDevice->getCompositionDisplay();
             const auto& displayState = display->getState();
             Region opaqueRegion;
@@ -3482,6 +3527,8 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                     bool displaySizeChanged = false;
                     if (state.layerStack != draw[i].layerStack) {
                         display->setLayerStack(state.layerStack);
+                        // PICO (factory 0xed248)
+                        display->setNeedsRefresh(true);
                     }
                     if ((state.orientation != draw[i].orientation) ||
                         (state.viewport != draw[i].viewport) || (state.frame != draw[i].frame)) {
@@ -3494,6 +3541,8 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                             displaySizeChanged = true;
                         } else {
                             display->setProjection(state.orientation, state.viewport, state.frame);
+                            // PICO (factory 0xed464)
+                            display->setNeedsRefresh(true);
                         }
                     }
                     if (state.flags != draw[i].flags) {
@@ -3502,6 +3551,8 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                     if (state.width != draw[i].width || state.height != draw[i].height) {
                         if (!displaySizeChanged) {
                             display->setDisplaySize(state.width, state.height);
+                            // PICO (factory 0xed4f8)
+                            display->setNeedsRefresh(true);
                         }
                     }
                 }
@@ -4109,11 +4160,21 @@ bool SurfaceFlinger::handlePageFlip()
     // 3.) Layer 1 is latched.
     // Display is now waiting on Layer 1's frame, which is behind layer 0's
     // second frame. But layer 0's second frame could be waiting on display.
+    // PICO: number of auto-refresh layers among mLayersWithQueuedFrames.
+    int autoRefreshLayers = 0;
     mDrawingState.traverseInZOrder([&](Layer* layer) {
         if (layer->hasReadyFrame()) {
-            frameQueued = true;
+            // PICO (factory handlePageFlip lambda 0x1044a0): a ready frame of an auto-refresh
+            // layer does not schedule another wake-up.
+            bool cast = false;
+            if (!getAutoRefresh(layer, mDisplays, cast)) {
+                frameQueued = true;
+            }
             const nsecs_t expectedPresentTime = getExpectedPresentTime();
             if (layer->shouldPresentNow(expectedPresentTime)) {
+                if (getAutoRefresh(layer, mDisplays, cast)) {
+                    autoRefreshLayers++;
+                }
                 mLayersWithQueuedFrames.push_back(layer);
             } else {
                 ATRACE_NAME("!layer->shouldPresentNow()");
@@ -4121,6 +4182,20 @@ bool SurfaceFlinger::handlePageFlip()
             }
         } else {
             layer->useEmptyDamage();
+        }
+
+        // PICO (factory 0x1049f4): a virtual 2D app display needs a new composition when a
+        // layer of its layer stack changed its visible region or has a new frame.
+        for (const auto& [token, display] : mDisplays) {
+            if (display->needsRefresh() || !display->isVirtual() || !display->isPicoAppDisplay()) {
+                continue;
+            }
+            bool changed = false;
+            if (layer->visibleRegionChanged() || layer->hasReadyFrame()) {
+                changed = display->getCompositionDisplay()->belongsInOutput(
+                        layer->getLayerStack(), layer->getPrimaryDisplayOnly());
+            }
+            display->setNeedsRefresh(changed);
         }
     });
 
@@ -4135,7 +4210,15 @@ bool SurfaceFlinger::handlePageFlip()
             }
             layer->useSurfaceDamage();
             if (layer->isBufferLatched()) {
-                newDataLatched = true;
+                // PICO (factory onMessageReceived 0xe4b30): new data from an auto-refresh
+                // layer only counts when the visible regions changed.
+                bool cast = false;
+                if (!getAutoRefresh(layer, mDisplays, cast)) {
+                    newDataLatched = true;
+                } else if (visibleRegions) {
+                    ALOGI("%s: refresh needed!!! (%s)", __FUNCTION__, layer->getName().string());
+                    newDataLatched = true;
+                }
             }
         }
     }
@@ -4145,7 +4228,10 @@ bool SurfaceFlinger::handlePageFlip()
     // If we will need to wake up at some time in the future to deal with a
     // queued frame that shouldn't be displayed during this vsync period, wake
     // up during the next vsync period to check again.
-    if (frameQueued && (mLayersWithQueuedFrames.empty() || !newDataLatched)) {
+    // PICO (factory 0xe4bec): also when every queued layer is an auto-refresh layer.
+    if (frameQueued &&
+        (!newDataLatched ||
+         mLayersWithQueuedFrames.size() == static_cast<size_t>(autoRefreshLayers))) {
         signalLayerUpdate();
     }
 
