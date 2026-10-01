@@ -121,6 +121,16 @@ on late-init
     chmod 0666 /sys/kernel/tracing/events/task/task_rename/enable
     chmod 0666 /sys/kernel/debug/tracing/events/task/task_newtask/enable
     chmod 0666 /sys/kernel/tracing/events/task/task_newtask/enable
+    chmod 0666 /sys/kernel/tracing/events/kgsl/adreno_cmdbatch_sync/enable
+    chmod 0666 /sys/kernel/tracing/events/kgsl/adreno_cmdbatch_queued/enable
+    chmod 0666 /sys/kernel/tracing/events/kgsl/adreno_cmdbatch_submitted/enable
+    chmod 0666 /sys/kernel/tracing/events/kgsl/adreno_cmdbatch_retired/enable
+    chmod 0666 /sys/kernel/tracing/events/kgsl/kgsl_pwr_set_state/enable
+    chmod 0666 /sys/kernel/tracing/events/kgsl/kgsl_pwrlevel/enable
+    chmod 0666 /sys/kernel/tracing/events/kgsl/kgsl_buslevel/enable
+    chmod 0666 /sys/kernel/tracing/events/kgsl/adreno_hw_preempt_trig_to_comp_int/enable
+    chmod 0666 /sys/kernel/tracing/events/sde/tracing_mark_write/enable
+    chmod 0666 /sys/kernel/tracing/events/hid/enable
 
     # disk
     chmod 0666 /sys/kernel/tracing/events/f2fs/f2fs_get_data_block/enable
@@ -204,10 +214,102 @@ on late-init
     chmod 0666 /sys/kernel/debug/tracing/per_cpu/cpu15/trace
     chmod 0666 /sys/kernel/tracing/per_cpu/cpu15/trace
 
-on property:persist.debug.atrace.boottrace=1
-    start boottrace
+on fs
+   setprop persist.dump.sched.enabled 1
 
-# Run atrace with the categories written in a file
-service boottrace /system/bin/atrace --async_start -f /data/misc/boottrace/categories
-    disabled
-    oneshot
+# Only create the tracing instance if persist.dump_sched.enabled
+# Attempting to remove the tracing instance after it has been created
+# will likely fail with EBUSY as it would be in use by traced_probes.
+on property:persist.dump.sched.enabled=1
+# Create dump_sched Tracing Instance for dump_sched
+    mkdir /sys/kernel/debug/tracing/instances/dump_sched 0755 system system
+    mkdir /sys/kernel/tracing/instances/dump_sched 0755 system system
+
+# Read and set per CPU buffer size
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/buffer_size_kb
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/buffer_size_kb
+
+# Set the default buffer size to the minimum
+    write /sys/kernel/debug/tracing/instances/dump_sched/buffer_size_kb 100
+    write /sys/kernel/tracing/instances/dump_sched/buffer_size_kb 100
+
+# Read and enable tracing
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/tracing_on
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/tracing_on
+
+# Tracing disabled by default
+    write /sys/kernel/debug/tracing/instances/dump_sched/tracing_on 0
+    write /sys/kernel/tracing/instances/dump_sched/tracing_on 0
+
+# Read and truncate kernel trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/trace
+
+# Enable trace events
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/events/vmscan/mm_vmscan_direct_reclaim_begin/enable
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/events/vmscan/mm_vmscan_direct_reclaim_begin/enable
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/events/vmscan/mm_vmscan_kswapd_wake/enable
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/events/vmscan/mm_vmscan_kswapd_wake/enable
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/events/compaction/mm_compaction_begin/enable
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/events/compaction/mm_compaction_begin/enable
+
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/events/sched/sched_switch/enable
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/events/sched/sched_switch/enable
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/events/sched/sched_wakeup/enable
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/events/sched/sched_wakeup/enable
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/events/sched/sched_blocked_reason/enable
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/events/sched/sched_blocked_reason/enable
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/events/sched/sched_waking/enable
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/events/sched/sched_waking/enable
+
+# Read and clear per-CPU raw kernel trace
+# Cannot use wildcards in .rc files. Update this if there is a phone with
+# more CPUs.
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu0/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu0/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu1/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu1/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu2/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu2/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu3/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu3/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu4/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu4/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu5/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu5/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu6/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu6/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu7/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu7/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu8/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu8/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu9/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu9/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu10/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu10/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu11/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu11/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu12/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu12/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu13/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu13/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu14/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu14/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu15/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu15/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu16/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu16/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu17/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu17/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu18/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu18/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu19/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu19/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu20/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu20/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu21/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu21/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu22/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu22/trace
+    chmod 0666 /sys/kernel/debug/tracing/instances/dump_sched/per_cpu/cpu23/trace
+    chmod 0666 /sys/kernel/tracing/instances/dump_sched/per_cpu/cpu23/trace
