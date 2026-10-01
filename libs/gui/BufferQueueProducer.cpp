@@ -1479,6 +1479,11 @@ status_t BufferQueueProducer::connect(const sp<IProducerListener>& listener,
     ATRACE_CALL();
     BufferQueueCore::MutexLock lock(mCore->mMutex);
     mConsumerName = mCore->mConsumerName;
+    // Factory: logged for every producer whose consumer is not SurfaceFlinger, under the lock.
+    if (!mConsumerIsSurfaceFlinger) {
+        BQ_LOGI("connect: api %d, w*h = %d * %d", api, mCore->mDefaultWidth,
+                mCore->mDefaultHeight);
+    }
     BQ_LOGV("connect: api=%d producerControlledByApp=%s", api,
             producerControlledByApp ? "true" : "false");
 
@@ -1965,7 +1970,11 @@ void BufferQueueProducer::listenFreezeSelf() {
     FreezeManager* manager = FreezeManager::getInstance();
     if (manager) {
         manager->registerSelfUnFreezeListener(this,
-                [pending](const void*) { pending->store(true, std::memory_order_relaxed); },
+                [pending](const void* name) {
+                    // Factory: the callback argument is the unfrozen name (a C string).
+                    ALOGW("unFreeze Callback  %s", static_cast<const char*>(name));
+                    pending->store(true, std::memory_order_relaxed);
+                },
                 nullptr, false);
     }
 }
