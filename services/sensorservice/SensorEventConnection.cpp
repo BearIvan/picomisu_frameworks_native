@@ -45,20 +45,15 @@ SensorService::SensorEventConnection::SensorEventConnection(
 SensorService::SensorEventConnection::~SensorEventConnection() {
     ALOGD_IF(DEBUG_CONNECTIONS, "~SensorEventConnection(%p)", this);
     destroy();
-}
-
-void SensorService::SensorEventConnection::destroy() {
-    Mutex::Autolock _l(mDestroyLock);
-
-    // destroy once only
-    if (mDestroyed) {
-        return;
-    }
-
+    // Factory (AOSP b/168211968 security fix): the connection is cleaned up only when the
+    // last reference goes away; destroy() just marks it dead.
     mService->cleanupConnection(this);
     if (mEventCache != nullptr) {
         delete[] mEventCache;
     }
+}
+
+void SensorService::SensorEventConnection::destroy() {
     mDestroyed = true;
 }
 
@@ -603,6 +598,11 @@ status_t SensorService::SensorEventConnection::enableDisable(
         int handle, bool enabled, nsecs_t samplingPeriodNs, nsecs_t maxBatchReportLatencyNs,
         int reservedFlags)
 {
+    if (mDestroyed) {
+        android_errorWriteLog(0x534e4554, "168211968");
+        return DEAD_OBJECT;
+    }
+
     status_t err;
     if (enabled) {
         err = mService->enable(this, handle, samplingPeriodNs, maxBatchReportLatencyNs,
@@ -617,10 +617,19 @@ status_t SensorService::SensorEventConnection::enableDisable(
 status_t SensorService::SensorEventConnection::setEventRate(
         int handle, nsecs_t samplingPeriodNs)
 {
+    if (mDestroyed) {
+        android_errorWriteLog(0x534e4554, "168211968");
+        return DEAD_OBJECT;
+    }
+
     return mService->setEventRate(this, handle, samplingPeriodNs, mOpPackageName);
 }
 
 status_t  SensorService::SensorEventConnection::flush() {
+    if (mDestroyed) {
+        return DEAD_OBJECT;
+    }
+
     return  mService->flushSensor(this, mOpPackageName);
 }
 

@@ -17,6 +17,7 @@
 #ifndef ANDROID_SENSOR_EVENT_CONNECTION_H
 #define ANDROID_SENSOR_EVENT_CONNECTION_H
 
+#include <atomic>
 #include <stdint.h>
 #include <sys/types.h>
 #include <unordered_map>
@@ -182,8 +183,8 @@ private:
     int mTotalAcksNeeded, mTotalAcksReceived;
 #endif
 
-    mutable Mutex mDestroyLock;
-    bool mDestroyed;
+    // Factory layout (mDestroyed at 0xc8, atomic): no destroy lock (b/168211968).
+    std::atomic_bool mDestroyed;
     bool mHasSensorAccess;
 
     // Store a mapping of sensor handles to required AppOp for a sensor. This map only contains a
