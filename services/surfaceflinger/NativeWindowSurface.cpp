@@ -23,8 +23,6 @@ namespace android::surfaceflinger {
 
 NativeWindowSurface::~NativeWindowSurface() = default;
 
-sp<Surface> NativeWindowSurface::getSurface() const { return nullptr; }
-
 namespace impl {
 
 std::unique_ptr<surfaceflinger::NativeWindowSurface> createNativeWindowSurface(
@@ -37,7 +35,7 @@ std::unique_ptr<surfaceflinger::NativeWindowSurface> createNativeWindowSurface(
         ~NativeWindowSurface() override = default;
 
         sp<ANativeWindow> getNativeWindow() const override { return mSurface; }
-        sp<Surface> getSurface() const override { return mSurface; }
+        sp<Surface> getNativeWindowSurface() override { return mSurface; }
 
         void preallocateBuffers() override { mSurface->allocateBuffers(); }
 

@@ -18,6 +18,7 @@
 
 #include <gmock/gmock.h>
 
+#include <gui/Surface.h>
 #include <system/window.h> // for ANativeWindow
 
 #include "NativeWindowSurface.h"
@@ -30,6 +31,7 @@ public:
     ~NativeWindowSurface() override;
 
     MOCK_CONST_METHOD0(getNativeWindow, sp<ANativeWindow>());
+    MOCK_METHOD0(getNativeWindowSurface, sp<Surface>());
     MOCK_METHOD0(preallocateBuffers, void());
 };
 

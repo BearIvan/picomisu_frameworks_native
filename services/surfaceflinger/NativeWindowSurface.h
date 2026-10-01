@@ -38,11 +38,12 @@ public:
     // Gets the NativeWindow to use for the surface.
     virtual sp<ANativeWindow> getNativeWindow() const = 0;
 
+    // PICO: the typed Surface for the direct-buffer path (factory vtable slot after
+    // getNativeWindow, 0x187790).
+    virtual sp<Surface> getNativeWindowSurface() = 0;
+
     // Indicates that the surface should allocate its buffers now.
     virtual void preallocateBuffers() = 0;
-
-    // Typed Surface for the PICO direct-buffer path. Test windows may omit it.
-    virtual sp<Surface> getSurface() const;
 };
 
 namespace impl {
