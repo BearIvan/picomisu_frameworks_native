@@ -557,10 +557,14 @@ status_t VirtualDisplaySurface::detachNextBuffer(
     return INVALID_OPERATION;
 }
 
-status_t VirtualDisplaySurface::attachBuffer(int* /* outSlot */,
-        const sp<GraphicBuffer>& /* buffer */) {
-    VDS_LOGE("attachBuffer is not available for VirtualDisplaySurface");
-    return INVALID_OPERATION;
+status_t VirtualDisplaySurface::attachBuffer(int* outSlot,
+        const sp<GraphicBuffer>& buffer) {
+    // Factory 0xaf694: without an HWC display the sink is used directly (as in
+    // dequeueBuffer/queueBuffer); with one the call is accepted as a no-op.
+    if (!mDisplayId) {
+        return mSource[SOURCE_SINK]->attachBuffer(outSlot, buffer);
+    }
+    return NO_ERROR;
 }
 
 status_t VirtualDisplaySurface::queueBuffer(int pslot,
@@ -655,14 +659,12 @@ status_t VirtualDisplaySurface::connect(const sp<IProducerListener>& /*listener*
         int api, bool producerControlledByApp,
         QueueBufferOutput* output) {
     QueueBufferOutput qbo;
-    mReleaseListener = new VirtualDisplayProducerListener;
-    // A sink may retain its listener after this display is destroyed. A weak
-    // capture avoids both a reference cycle and the factory raw-this lifetime risk.
-    const wp<VirtualDisplaySurface> weakThis(this);
-    mReleaseListener->setCallback([weakThis](const sp<Fence>& fence, uint64_t id, bool replaced) {
-        const sp<VirtualDisplaySurface> display = weakThis.promote();
-        return display ? display->handleSingleLayerFence(fence, id, replaced) : NO_INIT;
-    });
+    // Factory 0xafb14: the release listener is bound to this display; disconnect()
+    // (called by ~RenderSurface before the display goes away) clears the callback
+    // under the listener mutex.
+    mReleaseListener = new VirtualDisplayProducerListener(
+            std::bind(&VirtualDisplaySurface::handleSingleLayerFence, this,
+                      std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
     status_t result = mSource[SOURCE_SINK]->connect(mReleaseListener, api,
             producerControlledByApp, &qbo);
     if (result == NO_ERROR) {

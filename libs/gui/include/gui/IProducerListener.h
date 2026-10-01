@@ -89,6 +89,11 @@ class VirtualDisplayProducerListener : public BnProducerListener
 {
 public:
     VirtualDisplayProducerListener() = default;
+    // Factory VirtualDisplaySurface::connect (libsurfaceflinger 0xafb14) constructs the
+    // listener inline with the callback copied into mCallback.
+    explicit VirtualDisplayProducerListener(
+            const std::function<int(const sp<Fence>&, uint64_t, bool)>& callback)
+          : mCallback(callback) {}
     ~VirtualDisplayProducerListener() override;
     void onBufferReleased() override {}
     bool needsReleaseNotify() override { return false; }
