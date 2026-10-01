@@ -4533,7 +4533,9 @@ bool SurfaceFlinger::requiresProtecedContext(const sp<DisplayDevice>& displayDev
     bool isSecureCamera = false;
     auto& renderEngine = getRenderEngine();
     auto display = displayDevice->getCompositionDisplay();
-    if (displayDevice->getId()) {
+    // PICO (factory doComposeSurfaces 0xe99fc-0xe9a1c): virtual displays without a HWC id are
+    // checked too.
+    if (displayDevice->getId() || display->isVirtual()) {
         // For display sinks which are not secure, avoid protected
         // content support in SurfaceFlinger
         if (!display->isSecure()) {
