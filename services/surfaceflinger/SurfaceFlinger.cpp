@@ -3621,11 +3621,17 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
     if ((transactionFlags & eTraversalNeeded) || mTraversalNeededMainThread) {
         mCurrentState.traverseInZOrder([&](Layer* layer) {
             uint32_t trFlags = layer->getTransactionFlags(eTransactionNeeded);
-            if (!trFlags) return;
+            if (!trFlags) {
+                // PICO (factory handleTransactionLocked lambda): no transaction, no change.
+                layer->setVisibleRegionChanged(false);
+                return;
+            }
 
             const uint32_t flags = layer->doTransaction(0);
             if (flags & Layer::eVisibleRegion)
                 mVisibleRegionsDirty = true;
+            // PICO: remembered per layer; read when 2D app displays are refreshed.
+            layer->setVisibleRegionChanged((flags & Layer::eVisibleRegion) != 0);
 
             if (flags & Layer::eInputInfoChanged) {
                 mInputInfoChanged = true;

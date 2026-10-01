@@ -839,12 +839,6 @@ public:
     // this to be called once.
     sp<IBinder> getHandle();
     const String8& getName() const;
-    void setPicoDequeueDuration(nsecs_t duration) {
-        mPicoDequeueDuration.store(duration, std::memory_order_release);
-    }
-    nsecs_t getPicoDequeueDuration() const {
-        return mPicoDequeueDuration.load(std::memory_order_acquire);
-    }
 
     // PICO: latch gating for the VR runtime's compositor surface ("PXRSurfaceControl#0",
     // marked by SurfaceFlinger::createLayer; factory Layer +0x2d4a / +0x2d4c). In auto-refresh
@@ -859,6 +853,10 @@ public:
     // PICO: set on the main thread when an auto-refresh producer reconnects; lets
     // BufferLayer::latchBuffer() latch once more while a refresh is pending (factory +0x2d50).
     void setProducerReconnected(bool reconnected) { mProducerReconnected = reconnected; }
+    // PICO: whether the last transaction of this layer changed its visible region (set by
+    // SurfaceFlinger::handleTransactionLocked, false when the layer had no transaction).
+    bool visibleRegionChanged() const { return mVisibleRegionChanged; }
+    void setVisibleRegionChanged(bool changed) { mVisibleRegionChanged = changed; }
 
     virtual void notifyAvailableFrames() {}
     virtual PixelFormat getPixelFormat() const { return PIXEL_FORMAT_NONE; }
@@ -919,11 +917,6 @@ protected:
     // We encode unset as -1.
     int32_t mOverrideScalingMode{-1};
     std::atomic<uint64_t> mCurrentFrameNumber{0};
-    std::atomic<nsecs_t> mPicoDequeueDuration{0};
-    // PICO: see isPxrSurface() / setProducerReconnected().
-    bool mIsPxrSurface{false};
-    std::atomic<int32_t> mPxrLatchState{kPxrLatchFree};
-    bool mProducerReconnected{false};
     bool mFrameLatencyNeeded{false};
     // Whether filtering is needed b/c of the drawingstate
     bool mNeedsFiltering{false};
@@ -1007,6 +1000,16 @@ private:
     bool mGetHandleCalled = false;
 
     void removeRemoteSyncPoints();
+
+protected:
+    // PICO: the factory keeps its Layer additions after mGetHandleCalled (+0x2d48), so the
+    // AOSP members keep their offsets: visible-region-changed flag +0x2d49, PXR surface flag
+    // +0x2d4a, latch state +0x2d4c, producer-reconnected flag +0x2d50.
+    // See visibleRegionChanged(), isPxrSurface() and setProducerReconnected().
+    bool mVisibleRegionChanged{true};
+    bool mIsPxrSurface{false};
+    std::atomic<int32_t> mPxrLatchState{kPxrLatchFree};
+    bool mProducerReconnected{false};
 };
 
 } // namespace android

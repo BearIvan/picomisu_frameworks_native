@@ -73,9 +73,8 @@ status_t MonitoredProducer::dequeueBuffer(int* slot, sp<Fence>* fence, uint32_t 
     if (result == NO_ERROR) {
         if (const sp<Layer> layer = mLayer.promote()) {
             const nsecs_t duration = systemTime(SYSTEM_TIME_MONOTONIC) - start;
-            // CAF SmoMo latency and PICO dequeue duration measure the same call.
+            // CAF SmoMo latency; the factory stores the PICO dequeue duration only here.
             layer->setDequeueLatency(duration);
-            layer->setPicoDequeueDuration(duration);
         }
     }
     mPicoMonitor.setFrameItem(MonitorIndex::End);

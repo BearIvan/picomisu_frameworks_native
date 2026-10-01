@@ -65,7 +65,6 @@ public:
     bool framePresentTimeIsCurrent() const override;
 
 private:
-    bool mPicoSingleLayerCandidate = false;
     nsecs_t getDesiredPresentTime() override;
     std::shared_ptr<FenceTime> getCurrentFenceTime() const override;
 
@@ -145,6 +144,9 @@ private:
 
     void fakeVsync();
     nsecs_t mLastTimeStamp = -1;
+
+    // PICO: ePicoSingleLayer creation flag; the factory keeps it after mLastTimeStamp (+0x2e58).
+    bool mPicoSingleLayerCandidate = false;
 };
 
 } // namespace android

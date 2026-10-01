@@ -56,15 +56,15 @@ TEST_F(PicoMonitoredProducerTest, SuccessfulDequeueForwardsAndRecordsLayerDurati
     EXPECT_CALL(*producer,dequeueBuffer(&slot,&fence,16,16,PIXEL_FORMAT_RGBA_8888,0,&age,nullptr))
         .WillOnce(Return(NO_ERROR));
     EXPECT_EQ(NO_ERROR,wrapped->dequeueBuffer(&slot,&fence,16,16,PIXEL_FORMAT_RGBA_8888,0,&age,nullptr));
-    EXPECT_GE(layer->getPicoDequeueDuration(),0);
+    EXPECT_GE(layer->getDequeueLatency(),0);
     EXPECT_EQ(nullptr,wrapped->getSurfaceClient()->findCurrentFrame(0));
 }
 TEST_F(PicoMonitoredProducerTest, FailedDequeuePreservesPreviousLayerDuration) {
-    layer->setPicoDequeueDuration(12345);
+    layer->setDequeueLatency(12345);
     int slot=-1;sp<Fence> fence;
     EXPECT_CALL(*producer,dequeueBuffer(_,_,_,_,_,_,_,_)).WillOnce(Return(BAD_VALUE));
     EXPECT_EQ(BAD_VALUE,wrapped->dequeueBuffer(&slot,&fence,16,16,PIXEL_FORMAT_RGBA_8888,0,nullptr,nullptr));
-    EXPECT_EQ(12345,layer->getPicoDequeueDuration());
+    EXPECT_EQ(12345,layer->getDequeueLatency());
 }
 TEST_F(PicoMonitoredProducerTest, QueueRecordsSlotAndLayerNameOnSuccessAndError) {
     int slot=-1;sp<Fence> fence;
