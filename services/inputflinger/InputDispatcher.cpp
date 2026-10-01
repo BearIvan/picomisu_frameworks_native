@@ -873,13 +873,28 @@ bool InputDispatcher::dispatchKeyLocked(nsecs_t currentTime, KeyEntry* entry,
     std::vector<InputTarget> inputTargets;
     int32_t injectionResult = findFocusedWindowTargetsLocked(currentTime,
             entry, inputTargets, nextWakeupTime);
-    if (injectionResult == INPUT_EVENT_INJECTION_PENDING) {
-        return false;
-    }
+    // PICO (factory dispatchKeyLocked 0x2353c): HOME and the PICO key codes 901/902 are not
+    // held back while the focused window is not ready. The injector is released with
+    // INPUT_EVENT_INJECTION_SUCCEEDED and the key goes to the targets found so far (the global
+    // monitors at least).
+    if (entry->type == EventEntry::TYPE_KEY
+            && (entry->keyCode == 901 || entry->keyCode == 902 || entry->keyCode == AKEYCODE_HOME)
+            && injectionResult == INPUT_EVENT_INJECTION_PENDING) {
+        ALOGE("dispatch key [%d], reset injectionResult", entry->keyCode);
+        InjectionState* injectionState = entry->injectionState;
+        if (injectionState) {
+            injectionState->injectionResult = INPUT_EVENT_INJECTION_SUCCEEDED;
+            mInjectionResultAvailable.notify_all();
+        }
+    } else {
+        if (injectionResult == INPUT_EVENT_INJECTION_PENDING) {
+            return false;
+        }
 
-    setInjectionResult(entry, injectionResult);
-    if (injectionResult != INPUT_EVENT_INJECTION_SUCCEEDED) {
-        return true;
+        setInjectionResult(entry, injectionResult);
+        if (injectionResult != INPUT_EVENT_INJECTION_SUCCEEDED) {
+            return true;
+        }
     }
 
     // Add monitor channels from event's or focused display.
@@ -1866,10 +1881,16 @@ std::string InputDispatcher::checkWindowReadyForMoreInputLocked(nsecs_t currentT
         // To obtain this behavior, we must serialize key events with respect to all
         // prior input events.
         if (!connection->outboundQueue.isEmpty() || !connection->waitQueue.isEmpty()) {
+            // PICO (factory 0x282c4): also the sequence number and delivery time (ms) of the
+            // wait queue head, 0 when the wait queue is empty.
+            const uint32_t waitCount = connection->waitQueue.count();
             return StringPrintf("Waiting to send key event because the %s window has not "
                     "finished processing all of the input events that were previously "
-                    "delivered to it.  Outbound queue length: %d.  Wait queue length: %d.",
-                    targetType, connection->outboundQueue.count(), connection->waitQueue.count());
+                    "delivered to it.  Outbound queue length: %d.  Wait queue length: %d."
+                    "Seq:%d.DeliveryTime:%.0f.",
+                    targetType, connection->outboundQueue.count(), waitCount,
+                    waitCount ? connection->waitQueue.head->seq : 0,
+                    waitCount ? connection->waitQueue.head->deliveryTime * 0.000001f : 0.0);
         }
     } else {
         // Touch events can always be sent to a window immediately because the user intended
@@ -1892,10 +1913,14 @@ std::string InputDispatcher::checkWindowReadyForMoreInputLocked(nsecs_t currentT
                         + STREAM_AHEAD_EVENT_TIMEOUT) {
             return StringPrintf("Waiting to send non-key event because the %s window has not "
                     "finished processing certain input events that were delivered to it over "
-                    "%0.1fms ago.  Wait queue length: %d.  Wait queue head age: %0.1fms.",
+                    "%0.1fms ago.  Wait queue length: %d.  Wait queue head age: %0.1fms."
+                    "Seq:%d.DeliveryTime:%.0f.",
                     targetType, STREAM_AHEAD_EVENT_TIMEOUT * 0.000001f,
                     connection->waitQueue.count(),
-                    (currentTime - connection->waitQueue.head->deliveryTime) * 0.000001f);
+                    (currentTime - connection->waitQueue.head->deliveryTime) * 0.000001f,
+                    // PICO (factory 0x28350): sequence number and delivery time (ms) of the head
+                    connection->waitQueue.head->seq,
+                    connection->waitQueue.head->deliveryTime * 0.000001f);
         }
     }
     return "";
