@@ -66,21 +66,14 @@ public:
         remote()->transact(ON_BUFFERS_DISCARDED, data, &reply, IBinder::FLAG_ONEWAY);
     }
 
+    // Factory: no fence check and no write-status checks; the fence must not be null.
     void onBufferReleasedWithFence(const sp<Fence>& fence, uint64_t bufferId,
                                   bool flag) override {
-        if (fence == nullptr) {
-            ALOGE("IProducerListener: null release fence");
-            return;
-        }
         Parcel data, reply;
-        status_t result = data.writeInterfaceToken(IProducerListener::getInterfaceDescriptor());
-        if (result == NO_ERROR) result = data.write(*fence);
-        if (result == NO_ERROR) result = data.writeUint64(bufferId);
-        if (result == NO_ERROR) result = data.writeBool(flag);
-        if (result != NO_ERROR) {
-            ALOGE("IProducerListener: failed to write release fence: %d", result);
-            return;
-        }
+        data.writeInterfaceToken(IProducerListener::getInterfaceDescriptor());
+        data.write(*fence);
+        data.writeUint64(bufferId);
+        data.writeBool(flag);
         remote()->transact(ON_BUFFER_RELEASED_WITH_FENCE, data, &reply, IBinder::FLAG_ONEWAY);
     }
 };
@@ -140,19 +133,16 @@ status_t BnProducerListener::onTransact(uint32_t code, const Parcel& data,
             return NO_ERROR;
         }
         case ON_BUFFER_RELEASED_WITH_FENCE: {
+            // Factory: the fence read status is ignored, the callback always runs and the
+            // transaction returns the readUint64 status.
             CHECK_INTERFACE(IProducerListener, data, reply);
             sp<Fence> fence = new Fence;
-            uint64_t bufferId;
-            bool flag;
-            status_t result = data.read(*fence);
-            if (result == NO_ERROR) result = data.readUint64(&bufferId);
-            if (result == NO_ERROR) result = data.readBool(&flag);
-            if (result != NO_ERROR) {
-                ALOGE("ON_BUFFER_RELEASED_WITH_FENCE: malformed payload: %d", result);
-                return result;
-            }
+            uint64_t bufferId = 0;
+            data.read(*fence);
+            status_t result = data.readUint64(&bufferId);
+            bool flag = data.readBool();
             onBufferReleasedWithFence(fence, bufferId, flag);
-            return NO_ERROR;
+            return result;
         }
     }
     return BBinder::onTransact(code, data, reply, flags);
@@ -188,7 +178,7 @@ void VirtualDisplayProducerListener::onBufferReleasedWithFence(
         // Factory ignores the callback's int result; the listener returns void.
         mCallback(fence, bufferId, flag);
     } else {
-        ALOGE("VirtualDisplayProducerListener: no release-fence callback");
+        ALOGE("onBufferReleasedWithFence callback is null!");
     }
 }
 

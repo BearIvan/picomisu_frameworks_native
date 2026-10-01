@@ -96,15 +96,6 @@ TEST(ProducerFenceTest, BinderDuplicatesAndTransfersFileDescriptor) {
     EXPECT_TRUE(recorder->lastFence->isValid());
 }
 
-TEST(ProducerFenceTest, NullProxyFenceIsNotTransacted) {
-    sp<FenceRecorder> recorder = new FenceRecorder;
-    sp<FenceRelay> relay = new FenceRelay(IInterface::asBinder(recorder));
-    sp<IProducerListener> proxy = interface_cast<IProducerListener>(relay);
-    proxy->onBufferReleasedWithFence(nullptr, 2, false);
-    EXPECT_EQ(0, relay->calls);
-    EXPECT_EQ(0, recorder->fences);
-}
-
 TEST(ProducerFenceTest, ServerRejectsWrongInterface) {
     sp<FenceRecorder> recorder = new FenceRecorder;
     Parcel data, reply;
@@ -116,7 +107,9 @@ TEST(ProducerFenceTest, ServerRejectsWrongInterface) {
     EXPECT_EQ(0, recorder->fences);
 }
 
-TEST(ProducerFenceTest, ServerRejectsEachTruncatedPayloadBeforeCallback) {
+TEST(ProducerFenceTest, ServerDeliversTruncatedPayloadAndReturnsIdReadStatus) {
+    // Factory: the fence and flag read statuses are ignored, the callback always runs and
+    // the transaction returns the status of the uint64 id read (a missing flag reads false).
     sp<FenceRecorder> recorder = new FenceRecorder;
     for (int stage = 0; stage < 4; ++stage) {
         Parcel data, reply;
@@ -124,12 +117,21 @@ TEST(ProducerFenceTest, ServerRejectsEachTruncatedPayloadBeforeCallback) {
         if (stage >= 1) { ASSERT_EQ(NO_ERROR, data.write(*Fence::NO_FENCE)); }
         if (stage == 2) { ASSERT_EQ(NO_ERROR, data.writeUint32(123)); }
         if (stage == 3) { ASSERT_EQ(NO_ERROR, data.writeUint64(0xfeedbeef12345678ULL)); }
-        EXPECT_NE(NO_ERROR, IInterface::asBinder(recorder)->transact(kReleaseFence, data, &reply));
-        EXPECT_EQ(0, recorder->fences);
+        const status_t result =
+                IInterface::asBinder(recorder)->transact(kReleaseFence, data, &reply);
+        if (stage == 3) {
+            EXPECT_EQ(NO_ERROR, result);
+            EXPECT_EQ(0xfeedbeef12345678ULL, recorder->lastId);
+        } else {
+            EXPECT_NE(NO_ERROR, result);
+            EXPECT_EQ(0u, recorder->lastId);
+        }
+        EXPECT_FALSE(recorder->lastFlag);
+        EXPECT_EQ(stage + 1, recorder->fences);
     }
 }
 
-TEST(ProducerFenceTest, ServerRejectsMalformedFenceDescriptorCount) {
+TEST(ProducerFenceTest, ServerIgnoresMalformedFenceDescriptorCount) {
     sp<FenceRecorder> recorder = new FenceRecorder;
     Parcel data, reply;
     ASSERT_EQ(NO_ERROR, data.writeInterfaceToken(recorder->getInterfaceDescriptor()));
@@ -139,8 +141,12 @@ TEST(ProducerFenceTest, ServerRejectsMalformedFenceDescriptorCount) {
     ASSERT_EQ(NO_ERROR, data.writeUint32(1));
     ASSERT_EQ(NO_ERROR, data.writeUint64(1));
     ASSERT_EQ(NO_ERROR, data.writeBool(false));
-    EXPECT_NE(NO_ERROR, IInterface::asBinder(recorder)->transact(kReleaseFence, data, &reply));
-    EXPECT_EQ(0, recorder->fences);
+    // Factory: the failed fence unflatten is ignored; the callback gets an invalid fence.
+    EXPECT_EQ(NO_ERROR, IInterface::asBinder(recorder)->transact(kReleaseFence, data, &reply));
+    EXPECT_EQ(1, recorder->fences);
+    EXPECT_EQ(1u, recorder->lastId);
+    ASSERT_NE(nullptr, recorder->lastFence.get());
+    EXPECT_FALSE(recorder->lastFence->isValid());
 }
 
 TEST(ProducerFenceTest, DefaultFenceCallbackDoesNotReplaceOrdinaryRelease) {
