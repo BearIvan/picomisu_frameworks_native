@@ -583,6 +583,7 @@ SurfaceFlinger::~SurfaceFlinger()
 
 void SurfaceFlinger::binderDied(const wp<IBinder>& /* who */)
 {
+    ALOGW("###binderDied###");
     // the window manager died on us. prepare its eulogy.
 
     // restore initial conditions (default device unblank, etc)
