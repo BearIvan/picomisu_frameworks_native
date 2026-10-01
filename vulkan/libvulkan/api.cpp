@@ -98,6 +98,26 @@ class OverrideLayerNames {
             names_[name_count_++] = names[i];
         }
 
+        // PICO: the Adreno profiler layer goes last (closest to the driver).
+        static const char kProfilerLayer[] = "VK_LAYER_ADRENO_qprofiler";
+        for (uint32_t i = 0; i < name_count_ - 1; i++) {
+            if (strcmp(names_[i], kProfilerLayer) == 0) {
+                names_[i] = names_[i + 1];
+                names_[i + 1] = kProfilerLayer;
+            }
+        }
+        if (getProfilerLayerFromPico()) {
+            bool found = false;
+            for (uint32_t i = 0; i < name_count_; i++) {
+                if (strcmp(names_[i], kProfilerLayer) == 0) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+                ALOGE("Can not load profiler vulkan layer to enable the gprobe tool.");
+        }
+
         return VK_SUCCESS;
     }
 
@@ -126,6 +146,12 @@ class OverrideLayerNames {
     void AddImplicitLayers() {
         if (!is_instance_)
             return;
+
+        // PICO: pico.validation.<package> makes the Khronos validation layer implicit.
+        if (getValidationLayerFromPico()) {
+            const char* validation_layer = "VK_LAYER_KHRONOS_validation";
+            AddImplicitLayer(-1, validation_layer, strlen(validation_layer));
+        }
 
         GetLayersFromSettings();
 

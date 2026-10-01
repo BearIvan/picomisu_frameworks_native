@@ -17,6 +17,8 @@
 #ifndef LIBVULKAN_LAYERS_EXTENSIONS_H
 #define LIBVULKAN_LAYERS_EXTENSIONS_H 1
 
+#include <string>
+
 #include <vulkan/vulkan.h>
 
 namespace vulkan {
@@ -44,6 +46,10 @@ class LayerRef {
 };
 
 void DiscoverLayers();
+// PICO: what DiscoverLayers found in the PICO properties.
+bool getValidationLayerFromPico();
+bool getProfilerLayerFromPico();
+std::string getPackageNameFromCmdline();
 
 uint32_t GetLayerCount();
 const Layer& GetLayer(uint32_t index);

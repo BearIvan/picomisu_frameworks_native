@@ -24,6 +24,7 @@
 #include <string.h>
 #include <sys/prctl.h>
 
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -70,6 +71,18 @@ struct Layer {
 namespace {
 
 const char kSystemLayerLibraryDir[] = "/data/local/debug/vulkan";
+// PICO: directories of the PICO validation / profiler layer libraries.
+const char kPicoLayerLibraryDir[] = "/system/lib64/vklayer";
+const char kPicoLayerLibraryDir32[] = "/system/lib/vklayer";
+#if defined(__LP64__)
+const char* const kPicoLayerLibraryPath = kPicoLayerLibraryDir;
+#else
+const char* const kPicoLayerLibraryPath = kPicoLayerLibraryDir32;
+#endif
+
+// PICO: set by DiscoverLayers from pico.validation.<package> and debug.pil.vklayer.
+bool g_validation_layer_from_pico;
+bool g_profiler_layer_from_pico;
 
 class LayerLibrary {
    public:
@@ -140,8 +153,11 @@ bool LayerLibrary::Open() {
         // can't safely use libc++_shared, for example. Which is one reason
         // (among several) we only allow them in non-user builds.
         auto app_namespace = android::GraphicsEnv::getInstance().getAppNamespace();
+        // PICO: the PICO layer directories are loaded like the system debug layer directory.
         if (app_namespace &&
-            !android::base::StartsWith(path_, kSystemLayerLibraryDir)) {
+            !android::base::StartsWith(path_, kSystemLayerLibraryDir) &&
+            !android::base::StartsWith(path_, kPicoLayerLibraryDir) &&
+            !android::base::StartsWith(path_, kPicoLayerLibraryDir32)) {
             char* error_msg = nullptr;
             dlhandle_ = OpenNativeLibraryInNamespace(
                 app_namespace, path_.c_str(), &native_bridge_, &error_msg);
@@ -481,6 +497,28 @@ void* GetLayerGetProcAddr(const Layer& layer,
 
 }  // anonymous namespace
 
+// PICO: the process name, from /proc/self/cmdline.
+std::string getPackageNameFromCmdline() {
+    std::ifstream cmdline("/proc/self/cmdline");
+    std::string name;
+    if (cmdline) {
+        std::getline(cmdline, name, '\0');
+    }
+    cmdline.close();
+    if (name.empty()) {
+        return "";
+    }
+    return name;
+}
+
+bool getValidationLayerFromPico() {
+    return g_validation_layer_from_pico;
+}
+
+bool getProfilerLayerFromPico() {
+    return g_profiler_layer_from_pico;
+}
+
 void DiscoverLayers() {
     ATRACE_CALL();
 
@@ -489,6 +527,20 @@ void DiscoverLayers() {
     }
     if (!android::GraphicsEnv::getInstance().getLayerPaths().empty())
         DiscoverLayersInPathList(android::GraphicsEnv::getInstance().getLayerPaths());
+
+    // PICO: pico.validation.<package> enables VK_LAYER_KHRONOS_validation for that package and
+    // debug.pil.vklayer the Adreno profiler layer; both are found in the PICO layer directory.
+    std::string package_name = getPackageNameFromCmdline();
+    if (!package_name.empty()) {
+        g_validation_layer_from_pico =
+                property_get_bool(("pico.validation." + package_name).c_str(), false);
+    }
+    g_profiler_layer_from_pico = property_get_bool("debug.pil.vklayer", false);
+    if (g_validation_layer_from_pico || g_profiler_layer_from_pico) {
+        std::string path(kPicoLayerLibraryPath);
+        ALOGI("path = %s", path.c_str());
+        DiscoverLayersInPathList(path);
+    }
 }
 
 uint32_t GetLayerCount() {
