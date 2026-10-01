@@ -165,6 +165,9 @@ sp<GraphicBuffer> RenderSurface::dequeueBuffer(base::unique_fd* bufferFence) {
     mGraphicBuffer = GraphicBuffer::from(buffer);
 
     *bufferFence = base::unique_fd(fd);
+    // PICO (factory 0x12c32c-0x12c350): a dequeued buffer ends the attach sequence, so the
+    // next attachBuffer of the same buffer is not rejected as ALREADY_EXISTS.
+    mLastAttachedBuffer.clear();
 
     return mGraphicBuffer;
 }
