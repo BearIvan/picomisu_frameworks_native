@@ -59,12 +59,12 @@ status_t BufferQueueConsumer::onTransact(uint32_t code, const Parcel& data,
     }
     CHECK_INTERFACE(IGraphicBufferConsumer, data, reply);
     // Factory (ImageManagerExt): a VrCompositor consumer sends its id and a log flag.
-    // The factory reads both values without checking the parcel status.
-    const int32_t consumerId = data.readInt32();
-    const int32_t logging = data.readInt32();
-    BufferQueueCore::MutexLock lock(mCore->mMutex);
-    mCore->mPicoConsumerId = consumerId;
-    mCore->mPicoConsumerLogging = logging == 1;
+    // The factory (0x70080) reads both values without checking the parcel status and
+    // stores them without taking mCore->mMutex: the transaction is sent once while the
+    // consumer is set up, the fields are single aligned scalars, and every reader
+    // (setMaxDequeuedBufferCount, queueBuffer, attachBuffer) accepts either value.
+    mCore->mPicoConsumerId = data.readInt32();
+    mCore->mPicoConsumerLogging = data.readInt32() == 1;
     mCore->mHasPicoConsumer = true;
     if (mCore->mPicoConsumerLogging) {
         ALOGI("ImageManagerExt init: consumer is VrCompositor %d", mCore->mPicoConsumerId);
