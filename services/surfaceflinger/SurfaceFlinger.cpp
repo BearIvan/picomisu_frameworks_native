@@ -4801,6 +4801,9 @@ void SurfaceFlinger::applyTransactionState(const Vector<ComposerState>& states,
 
     for (const DisplayState& display : displays) {
         transactionFlags |= setDisplayStateLocked(display);
+        // PICO (factory 0xef7f0)
+        ALOGD("%s:wxh:%dx%d layerStack:%d", __FUNCTION__, display.width, display.height,
+              display.layerStack);
     }
 
     // In case the client has sent a Transaction that should receive callbacks but without any
