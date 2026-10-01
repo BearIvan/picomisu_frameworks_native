@@ -2308,7 +2308,9 @@ void SurfaceFlinger::handleMessageRefresh() {
     // period is read without mStateLock, and a change resyncs to the hardware vsync before the
     // new offsets are applied.
     if (repaintEverything) {
-        const nsecs_t vsyncPeriod = getVsyncPeriod();
+        const nsecs_t vsyncPeriod = [this]() NO_THREAD_SAFETY_ANALYSIS {
+            return getVsyncPeriod();
+        }();
         if (mPhaseOffsets->updatePhaseOffsetsExt(vsyncPeriod)) {
             ATRACE_NAME("updatePhaseOffsetsIfNeededExt");
             mScheduler->resyncToHardwareVsync(true, vsyncPeriod, true /* force resync */);
