@@ -1388,8 +1388,6 @@ int32_t InputDispatcher::findTouchedWindowTargetsLocked(nsecs_t currentTime,
         }
 
         if (newTouchedWindowHandle == nullptr && newGestureMonitors.empty()) {
-            ALOGI("Dropping event because there is no touchable window or gesture monitor at "
-                    "(%d, %d) in display %" PRId32 ".", x, y, displayId);
             injectionResult = INPUT_EVENT_INJECTION_FAILED;
             goto Failed;
         }
@@ -3083,12 +3081,6 @@ void InputDispatcher::setInjectionResult(EventEntry* entry, int32_t injectionRes
                 && !(entry->policyFlags & POLICY_FLAG_FILTERED)) {
             // Log the outcome since the injector did not wait for the injection result.
             switch (injectionResult) {
-            case INPUT_EVENT_INJECTION_SUCCEEDED:
-                ALOGV("Asynchronous input event injection succeeded.");
-                break;
-            case INPUT_EVENT_INJECTION_FAILED:
-                ALOGW("Asynchronous input event injection failed.");
-                break;
             case INPUT_EVENT_INJECTION_PERMISSION_DENIED:
                 ALOGW("Asynchronous input event injection permission denied.");
                 break;
