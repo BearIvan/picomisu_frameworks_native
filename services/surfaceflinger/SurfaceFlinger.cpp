@@ -58,6 +58,7 @@
 #include <gui/LayerDebugInfo.h>
 #include <gui/Surface.h>
 #include <input/IInputFlinger.h>
+#include <mtp/SysMtpClient.h>
 #include <renderengine/RenderEngine.h>
 #include <ui/ColorSpace.h>
 #include <ui/DebugUtils.h>
@@ -92,7 +93,6 @@
 #include "StartPropertySetThread.h"
 #include "SurfaceFlinger.h"
 #include "PicoSingleLayerComposition.h"
-#include "PicoSysMtpClient.h"
 #include "SurfaceInterceptor.h"
 
 #include "DisplayHardware/ComposerHal.h"
@@ -1797,7 +1797,7 @@ void SurfaceFlinger::onVsyncReceived(int32_t sequenceId, hwc2_display_t hwcDispl
                                      int64_t timestamp) {
     ATRACE_NAME("SF onVsync");
     // PICO (factory 0xe17c8): every hardware vsync goes to the PICO system monitor.
-    pico::SysMtpClient::onVsync(timestamp);
+    mtp::SysMtpClient::getInstance()->onVsync(timestamp);
 
     Mutex::Autolock lock(mStateLock);
     // Ignore any vsyncs from a previous hardware composer.
@@ -4304,10 +4304,10 @@ void SurfaceFlinger::doDisplayComposition(const sp<DisplayDevice>& displayDevice
     // PICO (factory handleMessageRefresh 0xe6370): report the composed frame and the producer
     // frames it showed to the PICO system monitor.
     SysDisplayClient& sysClient = displayDevice->getSysDisplayClient();
-    pico::SysMtpClient::addDisplayFrame(sysClient.getCurrentSurfaceBuffer(),
-                                        static_cast<int>(display->getState().layerStackId),
-                                        sysClient.mLastComposeTime, sysClient.mComposeTime,
-                                        queueStartTime, systemTime(SYSTEM_TIME_MONOTONIC));
+    mtp::SysMtpClient::getInstance()->addDisplayFrame(
+            sysClient.getCurrentSurfaceBuffer(),
+            static_cast<int>(display->getState().layerStackId), sysClient.mLastComposeTime,
+            sysClient.mComposeTime, queueStartTime, systemTime(SYSTEM_TIME_MONOTONIC));
 }
 
 bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
@@ -6689,8 +6689,8 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
         // PICO (factory 0xf76d8): any caller may ask the PICO system monitor to write its
         // records; the other monitor codes below need the usual backdoor permission.
         if (code == 2008) {
-            pico::SysMtpClient::sendTaskToWritePb();
-            pico::SysMtpClient::sendTaskToWritePtpPb();
+            mtp::SysMtpClient::getInstance()->sendTaskToWritePb();
+            mtp::SysMtpClient::getInstance()->sendTaskToWritePtpPb();
             return NO_ERROR;
         }
         IPCThreadState* ipc = IPCThreadState::self();
@@ -7038,14 +7038,15 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                 const String8 a(data.readString16());
                 const String8 b(data.readString16());
                 const String8 c(data.readString16());
-                pico::SysMtpClient::setDeviceProp(a.string(), b.string(), c.string());
+                mtp::SysMtpClient::getInstance()->setDeviceProp(a.string(), b.string(),
+                                                                c.string());
                 return NO_ERROR;
             }
             case 2003:
-                pico::SysMtpClient::shutDown();
+                mtp::SysMtpClient::getInstance()->shutDown();
                 return NO_ERROR;
             case 2004:
-                pico::SysMtpClient::notifyDisplayRefresh(data.readInt32());
+                mtp::SysMtpClient::getInstance()->notifyDisplayRefresh(data.readInt32());
                 return NO_ERROR;
             case 2005:
             case 2007:
@@ -7054,37 +7055,39 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                 std::vector<int32_t> values;
                 data.readInt32Vector(&values);
                 if (code == 2005) {
-                    pico::SysMtpClient::notifyAutoDumpInfo(name.string(), values);
+                    mtp::SysMtpClient::getInstance()->notifyAutoDumpInfo(name.string(), values);
                 } else if (code == 2007) {
-                    pico::SysMtpClient::notifyCrashReportDumpInfo(name.string(), values);
+                    mtp::SysMtpClient::getInstance()->notifyCrashReportDumpInfo(name.string(),
+                                                                                values);
                 } else {
-                    pico::SysMtpClient::notifyLayerDumpInfo(name.string(), values);
+                    mtp::SysMtpClient::getInstance()->notifyLayerDumpInfo(name.string(), values);
                 }
                 return NO_ERROR;
             }
             case 2006:
-                pico::SysMtpClient::setDailyDumpPerfettoCount(data.readInt32());
+                mtp::SysMtpClient::getInstance()->setDailyDumpPerfettoCount(data.readInt32());
                 return NO_ERROR;
             case 2009: {
                 const int a = data.readInt32();
                 const int b = data.readInt32();
                 const int c = data.readInt32();
-                pico::SysMtpClient::notifyBacklight(a, b, c);
+                mtp::SysMtpClient::getInstance()->notifyBacklight(a, b, c);
                 return NO_ERROR;
             }
             case 2010:
-                pico::SysMtpClient::notifyLowPowerLevel(data.readInt32());
+                mtp::SysMtpClient::getInstance()->notifyLowPowerLevel(data.readInt32());
                 return NO_ERROR;
             case 2011:
-                pico::SysMtpClient::updateTerribleJankScope(data.readInt32());
+                mtp::SysMtpClient::getInstance()->updateTerribleJankScope(data.readInt32());
                 return NO_ERROR;
             case 2012:
-                pico::SysMtpClient::updateCameraRefresh(data.readInt32());
+                mtp::SysMtpClient::getInstance()->updateCameraRefresh(data.readInt32());
                 return NO_ERROR;
             case 2013: {
                 const String8 name(data.readString16());
                 const int value = data.readInt32();
-                pico::SysMtpClient::notifyVirtualDisplaySurfaceChanged(value, name.string());
+                mtp::SysMtpClient::getInstance()->notifyVirtualDisplaySurfaceChanged(value,
+                                                                                     name.string());
                 return NO_ERROR;
             }
             case 2014: {
@@ -7092,13 +7095,14 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                 const String8 b(data.readString16());
                 const int value = data.readInt32();
                 const int64_t time = data.readInt64();
-                pico::SysMtpClient::notifyLaunchPackageInfo(a.string(), b.string(), value, time);
+                mtp::SysMtpClient::getInstance()->notifyLaunchPackageInfo(a.string(), b.string(),
+                                                                          value, time);
                 return NO_ERROR;
             }
             case 2015: {
                 std::vector<int32_t> values;
                 data.readInt32Vector(&values);
-                pico::SysMtpClient::notifySchedInfoDumpInfo(values);
+                mtp::SysMtpClient::getInstance()->notifySchedInfoDumpInfo(values);
                 return NO_ERROR;
             }
         }
