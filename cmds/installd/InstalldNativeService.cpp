@@ -75,6 +75,10 @@
 using android::base::StringPrintf;
 using std::endl;
 
+// PICO OS 5.13.7: clearAppData() keeps the OBBs on shared storage, as the factory installd.
+// The factory source is not known; these comment lines and the ones in clearAppData() keep
+// the log line numbers of the factory InstalldNativeService.cpp (+4 here, +8 at the end).
+
 namespace android {
 namespace installd {
 
@@ -616,10 +620,14 @@ binder::Status InstalldNativeService::clearAppData(const std::unique_ptr<std::st
                 if (delete_dir_contents(path, true) != 0) {
                     res = error("Failed to delete contents of " + path);
                 }
-                path = StringPrintf("%s/Android/obb/%s", extPath.c_str(), pkgname);
-                if (delete_dir_contents(path, true) != 0) {
-                    res = error("Failed to delete contents of " + path);
-                }
+                // PICO OS 5.13.7: the factory clearAppData() does not clear
+                // Android/obb/<package> on shared storage (the AOSP Q code deleted its
+                // contents here, after Android/media, like destroyAppData() below).
+                // OBBs are only removed when the app is uninstalled, by destroyAppData(),
+                // as in Android 11. The factory source of this block is not known (its
+                // calls and strings are those of this code); with these eight comment
+                // lines the log line numbers of the rest of the file are the factory
+                // ones.
             }
         }
     }
