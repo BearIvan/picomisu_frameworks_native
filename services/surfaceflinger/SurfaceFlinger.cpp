@@ -2303,18 +2303,19 @@ void SurfaceFlinger::handleMessageRefresh() {
 
     mLayersWithQueuedFrames.clear();
 
-    // PICO (factory handleMessageRefresh): VR late phase offsets follow the panel refresh rate.
-    nsecs_t vsyncPeriod;
-    {
-        Mutex::Autolock lock(mStateLock);
-        vsyncPeriod = getVsyncPeriod();
-    }
-    if (mPhaseOffsets->updatePhaseOffsetsExt(vsyncPeriod)) {
-        // DispSync itself is resynced by CAF forceResyncModel() in postComposition().
-        ATRACE_NAME("updatePhaseOffsetsIfNeededExt");
-        const auto [early, gl, late] = mPhaseOffsets->getCurrentOffsets();
-        mVsyncModulator.setPhaseOffsets(early, gl, late,
-                                        mPhaseOffsets->getOffsetThresholdForNextVsync());
+    // PICO (factory handleMessageRefresh 0xe8358-0xe8414): on a repaint-everything refresh the
+    // VR early GL phase offsets follow the panel refresh rate. As in the factory, the vsync
+    // period is read without mStateLock, and a change resyncs to the hardware vsync before the
+    // new offsets are applied.
+    if (repaintEverything) {
+        const nsecs_t vsyncPeriod = getVsyncPeriod();
+        if (mPhaseOffsets->updatePhaseOffsetsExt(vsyncPeriod)) {
+            ATRACE_NAME("updatePhaseOffsetsIfNeededExt");
+            mScheduler->resyncToHardwareVsync(true, vsyncPeriod, true /* force resync */);
+            const auto [early, gl, late] = mPhaseOffsets->getCurrentOffsets();
+            mVsyncModulator.setPhaseOffsets(early, gl, late,
+                                            mPhaseOffsets->getOffsetThresholdForNextVsync());
+        }
     }
 }
 
