@@ -288,6 +288,9 @@ void SensorService::onFirstRef() {
             // priority can only be changed after run
             enableSchedFifoMode();
 
+            // Smartisan sensor freezer: thread applying the uid freeze changes.
+            mSensorLooper = new SensorLooperImpl(this);
+
             // Start watching UID changes to apply policy.
             mUidPolicy->registerSelf();
 
@@ -1770,7 +1773,8 @@ void SensorService::UidPolicy::registerSelf() {
     ActivityManager am;
     am.registerUidObserver(this, ActivityManager::UID_OBSERVER_GONE
             | ActivityManager::UID_OBSERVER_IDLE
-            | ActivityManager::UID_OBSERVER_ACTIVE,
+            | ActivityManager::UID_OBSERVER_ACTIVE
+            | UID_OBSERVER_FROZEN,
             ActivityManager::PROCESS_STATE_UNKNOWN,
             String16("android"));
 }
@@ -1778,6 +1782,103 @@ void SensorService::UidPolicy::registerSelf() {
 void SensorService::UidPolicy::unregisterSelf() {
     ActivityManager am;
     am.unregisterUidObserver(this);
+}
+
+status_t SensorService::UidPolicy::onTransact(uint32_t code, const Parcel& data, Parcel* reply,
+                                              uint32_t flags) {
+    status_t err = BnUidObserver::onTransact(code, data, reply, flags);
+    if (err != PERMISSION_DENIED && err != UNKNOWN_TRANSACTION) {
+        return err;
+    }
+    if (!data.checkInterface(this)) {
+        return PERMISSION_DENIED;
+    }
+    if (code != TRANSACTION_UID_FROZEN_CHANGED) {
+        return err;
+    }
+    uid_t uid = data.readInt32();
+    int32_t frozenStat = data.readInt32();
+    ALOGD("Sensor uid freeze change, uid = %d, frozen = %d", uid,
+          frozenStat == UID_FROZEN_STAT_FROZEN);
+    sp<SensorService> service = mService.promote();
+    if (service != nullptr) {
+        SensorLooperImpl::UidFrozenMsg* msg = new SensorLooperImpl::UidFrozenMsg();
+        msg->uid = uid;
+        msg->frozen = frozenStat == UID_FROZEN_STAT_FROZEN;
+        service->mSensorLooper->post(SensorLooperImpl::MSG_UPDATE_SENSOR_FROZEN, msg, false);
+    }
+    return NO_ERROR;
+}
+
+void SensorService::SensorLooperImpl::handle(int what, void* obj) {
+    if (what == MSG_UPDATE_SENSOR_FROZEN) {
+        UidFrozenMsg* msg = static_cast<UidFrozenMsg*>(obj);
+        uid_t uid = msg->uid;
+        bool frozen = msg->frozen;
+        ALOGD("SensorLooperImpl::handle uid = %d, frozen = %d", uid, frozen);
+        sp<SensorService> service = mService.promote();
+        if (service != nullptr) {
+            service->updateSensorFrozen(uid, frozen);
+        }
+        delete msg;
+    }
+}
+
+void SensorService::updateSensorFrozen(uid_t uid, bool frozen) {
+    Mutex::Autolock _l(mFrozenUidsLock);
+    if (frozen) {
+        if (uid < FIRST_APPLICATION_UID) {
+            return;
+        }
+        if (mFrozenUids.find(uid) != mFrozenUids.end()) {
+            return;
+        }
+        mFrozenUids.insert(uid);
+    } else {
+        if (mFrozenUids.erase(uid) == 0) {
+            return;
+        }
+    }
+    setSensorFrozen(uid, frozen);
+}
+
+void SensorService::setSensorFrozen(uid_t uid, bool frozen) {
+    ConnectionSafeAutolock connLock = mConnectionHolder.lock(mLock);
+    for (const sp<SensorEventConnection>& conn : connLock.getActiveConnections()) {
+        if (conn->getUid() == uid) {
+            frozenConnection(conn.get(), frozen, &connLock);
+        }
+    }
+    for (const sp<SensorDirectConnection>& conn : connLock.getDirectConnections()) {
+        if (conn->getUid() == uid) {
+            if (frozen) {
+                conn->stopAll(true /* backupRecord */);
+            } else {
+                conn->recoverAll();
+            }
+        }
+    }
+}
+
+void SensorService::frozenConnection(SensorEventConnection* c, bool frozen,
+                                     ConnectionSafeAutolock* connLock) {
+    if (c->getSensorFrozen() == frozen) {
+        return;
+    }
+    ALOGD("frozen sensors uid = %d, frozen = %d", c->getUid(), frozen);
+    sp<SensorEventConnection> connection(c);
+    SensorDevice& dev(SensorDevice::getInstance());
+    if (frozen) {
+        dev.freezeClientSensors(connection.get());
+    } else {
+        dev.unfreezeClientSensors(connection.get());
+    }
+    c->setSensorFrozen(frozen);
+    c->updateLooperRegistration(mLooper);
+    if (c->needsWakeLock()) {
+        checkWakeLockStateLocked(connLock);
+    }
+    BatteryService::freeze(c->getUid(), frozen);
 }
 
 void SensorService::UidPolicy::onUidGone(__unused uid_t uid, __unused bool disabled) {

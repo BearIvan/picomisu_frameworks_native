@@ -20,6 +20,7 @@ cc_library_shared {
         "SensorFusion.cpp",
         "SensorInterface.cpp",
         "SensorList.cpp",
+        "SensorLooper.cpp",
         "SensorRecord.cpp",
         "SensorService.cpp",
         "SensorServiceUtils.cpp",
@@ -50,6 +51,8 @@ cc_library_shared {
         "libfmq",
         "android.hardware.sensors@1.0",
         "android.hardware.sensors@2.0",
+        // SensorLooper attaches its thread to the Java VM (factory PICO OS 5.13.7).
+        "libandroid_runtime",
     ],
 
     static_libs: ["android.hardware.sensors@1.0-convert"],

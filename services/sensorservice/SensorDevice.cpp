@@ -917,7 +917,8 @@ int SensorDevice::Info::numActiveClients() const {
     SensorDevice& device(SensorDevice::getInstance());
     int num = 0;
     for (size_t i = 0; i < batchParams.size(); ++i) {
-        if (!device.isClientDisabledLocked(batchParams.keyAt(i))) {
+        if (!device.isClientDisabledLocked(batchParams.keyAt(i)) &&
+                !device.isClientFrozenLocked(batchParams.keyAt(i))) {
             ++num;
         }
     }
@@ -968,6 +969,61 @@ ssize_t SensorDevice::Info::removeBatchParamsForIdent(void* ident) {
 void SensorDevice::notifyConnectionDestroyed(void* ident) {
     Mutex::Autolock _l(mLock);
     mDisabledClients.remove(ident);
+    mFrozenClients.remove(ident);
+}
+
+// Smartisan sensor freezer (factory PICO OS 5.13.7). The factory never powers down sensor handles
+// 51 and 191 for a frozen client.
+void SensorDevice::unfreezeClientSensors(void* ident) {
+    if (mSensors == nullptr) return;
+    Mutex::Autolock _l(mLock);
+    mFrozenClients.remove(ident);
+    for (size_t i = 0; i < mActivationCount.size(); ++i) {
+        Info& info = mActivationCount.editValueAt(i);
+        if (info.batchParams.isEmpty()) continue;
+        if (info.batchParams.indexOfKey(ident) < 0) continue;
+        const int sensor_handle = mActivationCount.keyAt(i);
+        if (sensor_handle == 0xbf || sensor_handle == 0x33) {
+            ALOGD("\t>> not reenable actuating h/w sensor disable handle=%d ", sensor_handle);
+            continue;
+        }
+        info.selectBatchParams();
+        ALOGD("\t>> reenable actuating h/w sensor enable handle=%d ", sensor_handle);
+        status_t err = checkReturnAndGetStatus(mSensors->batch(sensor_handle,
+                                                              info.bestBatchParams.mTSample,
+                                                              info.bestBatchParams.mTBatch));
+        if (err != NO_ERROR) {
+            ALOGE("Error calling batch on sensor %d (%s)", sensor_handle, strerror(-err));
+            continue;
+        }
+        if (info.numActiveClients() == 1) {
+            err = checkReturnAndGetStatus(mSensors->activate(sensor_handle, 1 /* enabled */));
+            if (err != NO_ERROR) {
+                ALOGE("Error activating sensor %d (%s)", sensor_handle, strerror(-err));
+            } else {
+                info.isActive = true;
+            }
+        }
+    }
+}
+
+void SensorDevice::freezeClientSensors(void* ident) {
+    if (mSensors == nullptr) return;
+    Mutex::Autolock _l(mLock);
+    for (size_t i = 0; i < mActivationCount.size(); ++i) {
+        Info& info = mActivationCount.editValueAt(i);
+        if (info.numActiveClients() == 1 && info.batchParams.indexOfKey(ident) >= 0) {
+            const int sensor_handle = mActivationCount.keyAt(i);
+            if (sensor_handle == 0x33 || sensor_handle == 0xbf) {
+                ALOGD("\t>> not actuating h/w sensor disable handle=%d ", sensor_handle);
+                continue;
+            }
+            ALOGD("\t>> actuating h/w sensor disable handle=%d ", sensor_handle);
+            checkReturn(mSensors->activate(sensor_handle, 0 /* disabled */));
+            info.isActive = false;
+        }
+    }
+    mFrozenClients.add(ident);
 }
 
 bool SensorDevice::isDirectReportSupported() const {

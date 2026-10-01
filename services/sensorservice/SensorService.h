@@ -18,6 +18,7 @@
 #define ANDROID_SENSOR_SERVICE_H
 
 #include "SensorList.h"
+#include "SensorLooper.h"
 #include "RecentEventLogger.h"
 
 #include <android-base/macros.h>
@@ -184,6 +185,15 @@ private:
 
             void addOverrideUid(uid_t uid, bool active);
             void removeOverrideUid(uid_t uid);
+
+            // Smartisan sensor freezer (factory PICO OS 5.13.7): ActivityManagerService reports
+            // uid freeze changes (uid, frozenStat; 2 = frozen) to the observers registered with
+            // UID_OBSERVER_FROZEN through this transaction.
+            static constexpr int32_t UID_OBSERVER_FROZEN = 1 << 17;
+            static constexpr uint32_t TRANSACTION_UID_FROZEN_CHANGED = 1020;
+            static constexpr int32_t UID_FROZEN_STAT_FROZEN = 2;
+            virtual status_t onTransact(uint32_t code, const Parcel& data, Parcel* reply,
+                                        uint32_t flags = 0);
         private:
             bool isUidActiveLocked(uid_t uid);
             void updateOverrideUid(uid_t uid, bool active, bool insert);
@@ -216,6 +226,25 @@ private:
         private:
             wp<SensorService> mService;
             std::atomic_bool mSensorPrivacyEnabled;
+    };
+
+    // Smartisan sensor freezer (factory PICO OS 5.13.7): applies the uid freeze changes reported to
+    // UidPolicy on the SensorLooper thread.
+    class SensorLooperImpl : public SensorLooper {
+        public:
+            enum {
+                MSG_UPDATE_SENSOR_FROZEN = 1,
+            };
+            struct UidFrozenMsg {
+                uid_t uid;
+                bool frozen;
+            };
+
+            explicit SensorLooperImpl(const wp<SensorService>& service) : mService(service) {}
+            virtual void handle(int what, void* obj);
+
+        private:
+            wp<SensorService> mService;
     };
 
     enum Mode {
@@ -366,6 +395,13 @@ private:
     void enableAllSensors();
     void enableAllSensorsLocked(ConnectionSafeAutolock* connLock);
 
+    // Smartisan sensor freezer (factory PICO OS 5.13.7): freezes or unfreezes the sensor
+    // connections of an application uid.
+    void updateSensorFrozen(uid_t uid, bool frozen);
+    void setSensorFrozen(uid_t uid, bool frozen);
+    void frozenConnection(SensorEventConnection* connection, bool frozen,
+                          ConnectionSafeAutolock* connLock);
+
     static uint8_t sHmacGlobalKey[128];
     static bool sHmacGlobalKeyIsValid;
 
@@ -402,6 +438,12 @@ private:
 
     sp<UidPolicy> mUidPolicy;
     sp<SensorPrivacyPolicy> mSensorPrivacyPolicy;
+
+    // Smartisan sensor freezer: frozen application uids (protected by mFrozenUidsLock) and the
+    // thread applying the changes.
+    std::unordered_set<uid_t> mFrozenUids;
+    Mutex mFrozenUidsLock;
+    SensorLooperImpl* mSensorLooper;
 
     static AppOpsManager sAppOpsManager;
     static std::map<String16, int> sPackageTargetVersion;

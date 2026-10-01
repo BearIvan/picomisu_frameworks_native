@@ -71,6 +71,11 @@ public:
 
     void setSensorAccess(const bool hasAccess);
 
+    // Smartisan sensor freezer (factory PICO OS 5.13.7): a frozen connection is removed from the
+    // looper (no events, no acknowledgements) until it is unfrozen.
+    void setSensorFrozen(bool frozen);
+    bool getSensorFrozen();
+
 private:
     virtual ~SensorEventConnection();
     virtual void onFirstRef();
@@ -190,6 +195,9 @@ private:
     // Store a mapping of sensor handles to required AppOp for a sensor. This map only contains a
     // valid mapping for sensors that require a permission in order to reduce the lookup time.
     std::unordered_map<int32_t, int32_t> mHandleToAppOp;
+
+    // Smartisan sensor freezer, protected by mConnectionLock.
+    bool mSensorFrozen;
 };
 
 } // namepsace android

@@ -91,6 +91,27 @@ void BatteryService::cleanupImpl(uid_t uid) {
     }
 }
 
+// Smartisan sensor freezer (factory PICO OS 5.13.7): report the sensors of a frozen uid as stopped
+// to battery stats, and as started again when it is unfrozen.
+void BatteryService::freezeImpl(uid_t uid, bool frozen) {
+    if (checkService()) {
+        Mutex::Autolock _l(mActivationsLock);
+        int64_t identity = IPCThreadState::self()->clearCallingIdentity();
+        for (size_t i=0 ; i<mActivations.size() ; i++) {
+            Info& info(mActivations.editItemAt(i));
+            if (info.uid == uid && info.frozen != frozen) {
+                if (frozen) {
+                    mBatteryStatService->noteStopSensor(info.uid, info.handle);
+                } else {
+                    mBatteryStatService->noteStartSensor(info.uid, info.handle);
+                }
+                info.frozen = frozen;
+            }
+        }
+        IPCThreadState::self()->restoreCallingIdentity(identity);
+    }
+}
+
 bool BatteryService::checkService() {
     if (mBatteryStatService == nullptr) {
         const sp<IServiceManager> sm(defaultServiceManager());

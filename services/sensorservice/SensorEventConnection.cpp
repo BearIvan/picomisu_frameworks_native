@@ -34,7 +34,7 @@ SensorService::SensorEventConnection::SensorEventConnection(
       mDead(false), mDataInjectionMode(isDataInjectionMode), mEventCache(nullptr),
       mCacheSize(0), mMaxCacheSize(0), mTimeOfLastEventDrop(0), mEventsDropped(0),
       mPackageName(packageName), mOpPackageName(opPackageName), mDestroyed(false),
-      mHasSensorAccess(hasSensorAccess) {
+      mHasSensorAccess(hasSensorAccess), mSensorFrozen(false) {
     mChannel = new BitTube(mService->mSocketBufferSize);
 #if DEBUG_CONNECTIONS
     mEventsReceived = mEventsSentFromCache = mEventsSent = 0;
@@ -55,6 +55,16 @@ SensorService::SensorEventConnection::~SensorEventConnection() {
 
 void SensorService::SensorEventConnection::destroy() {
     mDestroyed = true;
+}
+
+void SensorService::SensorEventConnection::setSensorFrozen(bool frozen) {
+    Mutex::Autolock _l(mConnectionLock);
+    mSensorFrozen = frozen;
+}
+
+bool SensorService::SensorEventConnection::getSensorFrozen() {
+    Mutex::Autolock _l(mConnectionLock);
+    return mSensorFrozen;
 }
 
 void SensorService::SensorEventConnection::onFirstRef() {
@@ -81,6 +91,7 @@ void SensorService::SensorEventConnection::dump(String8& result) {
     } else {
         result.append("NORMAL\n");
     }
+    result.appendFormat("\tFrozen state: %d", mSensorFrozen);
     result.appendFormat("\t %s | WakeLockRefCount %d | uid %d | cache size %d | "
             "max cache size %d\n", mPackageName.string(), mWakeLockRefCount, mUid, mCacheSize,
             mMaxCacheSize);
@@ -172,7 +183,7 @@ void SensorService::SensorEventConnection::updateLooperRegistrationLocked(
                               mDataInjectionMode;
     // If all sensors are unregistered OR Looper has encountered an error, we can remove the Fd from
     // the Looper if it has been previously added.
-    if (!isConnectionActive || mDead) { if (mHasLooperCallbacks) {
+    if (!isConnectionActive || mDead || mSensorFrozen) { if (mHasLooperCallbacks) {
         ALOGD_IF(DEBUG_CONNECTIONS, "%p removeFd fd=%d", this,
                  mChannel->getSendFd());
         looper->removeFd(mChannel->getSendFd()); mHasLooperCallbacks = false; }

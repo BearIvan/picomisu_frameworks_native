@@ -33,13 +33,17 @@ class BatteryService : public Singleton<BatteryService> {
     void enableSensorImpl(uid_t uid, int handle);
     void disableSensorImpl(uid_t uid, int handle);
     void cleanupImpl(uid_t uid);
+    void freezeImpl(uid_t uid, bool frozen);
 
     struct Info {
         uid_t uid;
         int handle;
         int32_t count;
-        Info()  : uid(0), handle(0), count(0) { }
-        Info(uid_t uid, int handle) : uid(uid), handle(handle), count(0) { }
+        // Smartisan sensor freezer: battery stats were told this sensor use stopped because the
+        // uid is frozen.
+        bool frozen;
+        Info()  : uid(0), handle(0), count(0), frozen(false) { }
+        Info(uid_t uid, int handle) : uid(uid), handle(handle), count(0), frozen(false) { }
         bool operator < (const Info& rhs) const {
             return (uid == rhs.uid) ? (handle < rhs.handle) :  (uid < rhs.uid);
         }
@@ -60,6 +64,9 @@ public:
     }
     static void cleanup(uid_t uid) {
         BatteryService::getInstance().cleanupImpl(uid);
+    }
+    static void freeze(uid_t uid, bool frozen) {
+        BatteryService::getInstance().freezeImpl(uid, frozen);
     }
 };
 

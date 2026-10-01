@@ -110,6 +110,11 @@ public:
     status_t injectSensorData(const sensors_event_t *event);
     void notifyConnectionDestroyed(void *ident);
 
+    // Smartisan sensor freezer (factory PICO OS 5.13.7): deactivate the hardware sensors only the
+    // frozen client ident uses / reactivate them when it is unfrozen.
+    void freezeClientSensors(void *ident);
+    void unfreezeClientSensors(void *ident);
+
     using Result = ::android::hardware::sensors::V1_0::Result;
     hardware::Return<void> onDynamicSensorsConnected(
             const hardware::hidl_vec<hardware::sensors::V1_0::SensorInfo> &dynamicSensorsAdded);
@@ -224,6 +229,9 @@ private:
 
     bool isClientDisabled(void* ident);
     bool isClientDisabledLocked(void* ident);
+    bool isClientFrozenLocked(void* ident) {
+        return mFrozenClients.indexOf(ident) >= 0;
+    }
 
     using Event = hardware::sensors::V1_0::Event;
     using SensorInfo = hardware::sensors::V1_0::SensorInfo;
@@ -249,6 +257,9 @@ private:
 
     sp<SensorsHalDeathReceivier> mSensorsHalDeathReceiver;
     std::atomic_bool mReconnecting;
+
+    // Clients frozen by the Smartisan sensor freezer, protected by mLock.
+    SortedVector<void *> mFrozenClients;
 };
 
 // ---------------------------------------------------------------------------
