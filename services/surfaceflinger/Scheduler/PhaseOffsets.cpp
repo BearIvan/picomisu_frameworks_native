@@ -219,13 +219,14 @@ bool PhaseOffsets::updatePhaseOffsetsExt(nsecs_t vsyncPeriod) {
     mPicoTextImageOffset = is90Hz ? mPicoTextImage90 : mPicoTextImage72;
     const nsecs_t sf = is90Hz ? mPicoSf90 : mPicoSf72;
     const nsecs_t app = is90Hz ? mPicoApp90 : mPicoApp72;
-    // As in the factory: the late offsets of every non-low refresh rate type are replaced;
-    // POWER_SAVING and LOW0..LOW2 keep the debug.sf.* defaults.
+    // As in the factory: the early GL offsets of every non-low refresh rate type are replaced
+    // (hash node +56/+64 = earlyGl.sf/earlyGl.app); POWER_SAVING and LOW0..LOW2 keep the
+    // debug.sf.* defaults.
     for (const RefreshRateType type : {RefreshRateType::DEFAULT, RefreshRateType::PERFORMANCE,
                                        RefreshRateType::HIGH1, RefreshRateType::HIGH2}) {
-        auto& late = mOffsets.at(type).late;
-        late.sf = sf;
-        late.app = app;
+        auto& earlyGl = mOffsets.at(type).earlyGl;
+        earlyGl.sf = sf;
+        earlyGl.app = app;
     }
     mPicoVsyncPeriod = vsyncPeriod;
     return true;

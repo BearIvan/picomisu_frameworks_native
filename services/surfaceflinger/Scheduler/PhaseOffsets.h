@@ -51,8 +51,8 @@ public:
     virtual void dump(std::string& result) const = 0;
     virtual void setDefaultRefreshRateType(RefreshRateConfigs::RefreshRateType type) = 0;
 
-    // PICO (factory PhaseOffsets::updateConfigExt/updatePhaseOffsetsExt): late offsets of the
-    // VR refresh rates from persist.pvr.sf.*, applied when the vsync period changes.
+    // PICO (factory PhaseOffsets::updateConfigExt/updatePhaseOffsetsExt): early GL offsets of
+    // the VR refresh rates from persist.pvr.sf.*, applied when the vsync period changes.
     virtual void updateConfigExt() {}
     virtual bool updatePhaseOffsetsExt(nsecs_t /*vsyncPeriod*/) { return false; }
 };
@@ -102,7 +102,7 @@ private:
     RefreshRateConfigs::RefreshRateType mDefaultPhaseOffsetType =
         RefreshRateConfigs::RefreshRateType::DEFAULT;
 
-    // PICO late offsets (sf, app) and the update-tex-image offset for 72 Hz and 90 Hz panels.
+    // PICO early GL offsets (sf, app) and the update-tex-image offset for 72 Hz and 90 Hz panels.
     nsecs_t mPicoSf72 = 0, mPicoApp72 = 0, mPicoTextImage72 = 0;
     nsecs_t mPicoSf90 = 0, mPicoApp90 = 0, mPicoTextImage90 = 0;
     nsecs_t mPicoTextImageOffset = 0;
