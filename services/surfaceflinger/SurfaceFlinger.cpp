@@ -1367,6 +1367,10 @@ bool SurfaceFlinger::performSetActiveConfig() {
 
     ATRACE_INT("ActiveConfigModeHWC", mUpcomingActiveConfig.configId);
     getHwComposer().setActiveConfig(*displayId, mUpcomingActiveConfig.configId);
+    // PICO (factory, inlined in onMessageReceived 0xe316c-0xe3428): tell the producers of the
+    // visible layers the new fps level. The caller does not hold mStateLock;
+    // notifyLayerFpsLevel takes it around the layer traversal, as in the factory.
+    notifyLayerFpsLevel();
 
     // we need to submit an empty frame to HWC to start the process
     mCheckPendingFence = true;
