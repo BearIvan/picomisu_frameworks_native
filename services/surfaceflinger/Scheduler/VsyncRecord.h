@@ -17,6 +17,7 @@
 #pragma once
 
 #include <mutex>
+#include <string>
 
 #include <utils/Timers.h>
 
@@ -24,6 +25,11 @@
 // VsyncRecord, a function-local static shared by SurfaceFlinger::setDesiredActiveConfig and
 // Scheduler::setVsyncPeriod). Once a config change has been requested, the DispSync model is
 // resynced to the period of the requested config instead of the period the caller measured.
+//
+// Factory object layout (0x58 bytes, constructor inlined at 0xd4908, destructor 0xd5b64):
+// 0x00 not initialized, 0x08 std::string, 0x20 a zero-initialized 32-bit field, 0x24 the
+// mutex, 0x50 the period. Only the mutex and the period are read or written by the factory
+// library; the other members are kept for the layout and the destructor.
 class VsyncRecord {
 public:
     static VsyncRecord& getInstance() {
@@ -31,6 +37,9 @@ public:
         return sInstance;
     }
 
+    int64_t unused0;
+    std::string unused1;
+    int32_t unused2 = 0;
     std::mutex mutex;
     // 1e9 / fps of the desired active config; 0 until a config change was requested.
     nsecs_t period = 0;

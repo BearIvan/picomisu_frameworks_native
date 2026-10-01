@@ -34,7 +34,17 @@ namespace android {
 
 class HWComposer;
 class IProducerListener;
+class Layer;
 class VirtualDisplayProducerListener;
+
+// PICO: factory android::AttachedBufferTracker (namespace scope; LightRefBase, slot, buffer,
+// layer, counter), keyed by GraphicBuffer id in VirtualDisplaySurface::mAttachedBuffers.
+struct AttachedBufferTracker : public LightRefBase<AttachedBufferTracker> {
+    int slot;
+    sp<GraphicBuffer> buffer;
+    sp<Layer> layer;
+    int counter;
+};
 
 /* This DisplaySurface implementation supports virtual displays, where GLES
  * and/or HWC compose into a buffer that is then passed to an arbitrary
@@ -273,14 +283,7 @@ private:
     bool mSecure;
     int mSinkUsage;
 
-    // PICO: factory AttachedBufferTracker (LightRefBase, slot, buffer, layer, counter), keyed
-    // by GraphicBuffer id in mAttachedBuffers.
-    struct AttachedBufferTracker : public LightRefBase<AttachedBufferTracker> {
-        int slot;
-        sp<GraphicBuffer> buffer;
-        sp<Layer> layer;
-        int counter;
-    };
+    // PICO: attached buffers by GraphicBuffer id (AttachedBufferTracker above).
     std::map<uint64_t, sp<AttachedBufferTracker>> mAttachedBuffers;
     Mutex mSingleLayerMutex;
     bool mMultiLayer = true;
