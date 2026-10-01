@@ -1142,6 +1142,8 @@ private:
     InputTargetWaitCause mInputTargetWaitCause GUARDED_BY(mLock);
     nsecs_t mInputTargetWaitStartTime GUARDED_BY(mLock);
     nsecs_t mInputTargetWaitTimeoutTime GUARDED_BY(mLock);
+    nsecs_t mInputTargetWaitMonitorTime GUARDED_BY(mLock);
+    int32_t mInputTargetWaitMonitorTimes GUARDED_BY(mLock);
     bool mInputTargetWaitTimeoutExpired GUARDED_BY(mLock);
     sp<IBinder> mInputTargetWaitApplicationToken GUARDED_BY(mLock);
 

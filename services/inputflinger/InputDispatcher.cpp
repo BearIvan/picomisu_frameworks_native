@@ -1056,6 +1056,8 @@ int32_t InputDispatcher::handleTargetsNotReadyLocked(nsecs_t currentTime,
             mInputTargetWaitTimeoutTime = LONG_LONG_MAX;
             mInputTargetWaitTimeoutExpired = false;
             mInputTargetWaitApplicationToken.clear();
+            mInputTargetWaitMonitorTime = LONG_LONG_MAX;
+            mInputTargetWaitMonitorTimes = 0;
         }
     } else {
         if (mInputTargetWaitCause != INPUT_TARGET_WAIT_CAUSE_APPLICATION_NOT_READY) {
@@ -1079,6 +1081,9 @@ int32_t InputDispatcher::handleTargetsNotReadyLocked(nsecs_t currentTime,
             mInputTargetWaitTimeoutTime = currentTime + timeout;
             mInputTargetWaitTimeoutExpired = false;
             mInputTargetWaitApplicationToken.clear();
+            // Report an early "Monitor" ANR at half of the timeout.
+            mInputTargetWaitMonitorTime = currentTime + (timeout >> 1);
+            mInputTargetWaitMonitorTimes = 0;
 
             if (windowHandle != nullptr) {
                 mInputTargetWaitApplicationToken = windowHandle->getApplicationToken();
@@ -1102,9 +1107,30 @@ int32_t InputDispatcher::handleTargetsNotReadyLocked(nsecs_t currentTime,
         *nextWakeupTime = LONG_LONG_MIN;
         return INPUT_EVENT_INJECTION_PENDING;
     } else {
-        // Force poll loop to wake up when timeout is due.
-        if (mInputTargetWaitTimeoutTime < *nextWakeupTime) {
-            *nextWakeupTime = mInputTargetWaitTimeoutTime;
+        if (currentTime >= mInputTargetWaitMonitorTime) {
+            if (mInputTargetWaitMonitorTimes < 2) {
+                // Report the monitor ANR, then monitor again halfway to the timeout.
+                char monitorReason[strlen(reason) + 128];
+                snprintf(monitorReason, strlen(reason) + 128,
+                        "Monitor %sBeginTime:%.0f.MonitorTimes:%d.", reason,
+                        mInputTargetWaitStartTime * 0.000001f, mInputTargetWaitMonitorTimes);
+                onANRLocked(currentTime, applicationHandle, windowHandle,
+                        entry->eventTime, mInputTargetWaitStartTime, monitorReason);
+                mInputTargetWaitMonitorTime +=
+                        (mInputTargetWaitTimeoutTime - mInputTargetWaitMonitorTime) >> 1;
+                mInputTargetWaitMonitorTimes++;
+                // Force poll loop to wake up when the next monitor is due.
+                if (mInputTargetWaitMonitorTime < *nextWakeupTime) {
+                    *nextWakeupTime = mInputTargetWaitMonitorTime;
+                }
+            } else if (*nextWakeupTime == mInputTargetWaitMonitorTime
+                    || mInputTargetWaitTimeoutTime < *nextWakeupTime) {
+                // Force poll loop to wake up when timeout is due.
+                *nextWakeupTime = mInputTargetWaitTimeoutTime;
+            }
+        } else if (mInputTargetWaitMonitorTime < *nextWakeupTime) {
+            // Force poll loop to wake up when the monitor is due.
+            *nextWakeupTime = mInputTargetWaitMonitorTime;
         }
         return INPUT_EVENT_INJECTION_PENDING;
     }
@@ -4075,21 +4101,24 @@ void InputDispatcher::onANRLocked(
             getApplicationWindowLabel(applicationHandle, windowHandle).c_str(),
             dispatchLatency, waitDuration, reason);
 
-    // Capture a record of the InputDispatcher state at the time of the ANR.
-    time_t t = time(nullptr);
-    struct tm tm;
-    localtime_r(&t, &tm);
-    char timestr[64];
-    strftime(timestr, sizeof(timestr), "%F %T", &tm);
-    mLastANRState.clear();
-    mLastANRState += INDENT "ANR:\n";
-    mLastANRState += StringPrintf(INDENT2 "Time: %s\n", timestr);
-    mLastANRState += StringPrintf(INDENT2 "Window: %s\n",
-            getApplicationWindowLabel(applicationHandle, windowHandle).c_str());
-    mLastANRState += StringPrintf(INDENT2 "DispatchLatency: %0.1fms\n", dispatchLatency);
-    mLastANRState += StringPrintf(INDENT2 "WaitDuration: %0.1fms\n", waitDuration);
-    mLastANRState += StringPrintf(INDENT2 "Reason: %s\n", reason);
-    dumpDispatchStateLocked(mLastANRState);
+    // A monitor ANR does not replace the record of the last ANR.
+    if (strstr(reason, "Monitor ") == nullptr) {
+        // Capture a record of the InputDispatcher state at the time of the ANR.
+        time_t t = time(nullptr);
+        struct tm tm;
+        localtime_r(&t, &tm);
+        char timestr[64];
+        strftime(timestr, sizeof(timestr), "%F %T", &tm);
+        mLastANRState.clear();
+        mLastANRState += INDENT "ANR:\n";
+        mLastANRState += StringPrintf(INDENT2 "Time: %s\n", timestr);
+        mLastANRState += StringPrintf(INDENT2 "Window: %s\n",
+                getApplicationWindowLabel(applicationHandle, windowHandle).c_str());
+        mLastANRState += StringPrintf(INDENT2 "DispatchLatency: %0.1fms\n", dispatchLatency);
+        mLastANRState += StringPrintf(INDENT2 "WaitDuration: %0.1fms\n", waitDuration);
+        mLastANRState += StringPrintf(INDENT2 "Reason: %s\n", reason);
+        dumpDispatchStateLocked(mLastANRState);
+    }
 
     CommandEntry* commandEntry = postCommandLocked(
             & InputDispatcher::doNotifyANRLockedInterruptible);
@@ -4141,8 +4170,11 @@ void InputDispatcher::doNotifyANRLockedInterruptible(
 
     mLock.lock();
 
-    resumeAfterTargetsNotReadyTimeoutLocked(newTimeout,
-            commandEntry->inputChannel);
+    // A monitor ANR only reports; the dispatcher keeps waiting for the real timeout.
+    if (strstr(commandEntry->reason.c_str(), "Monitor ") == nullptr) {
+        resumeAfterTargetsNotReadyTimeoutLocked(newTimeout,
+                commandEntry->inputChannel);
+    }
 }
 
 void InputDispatcher::doInterceptKeyBeforeDispatchingLockedInterruptible(
