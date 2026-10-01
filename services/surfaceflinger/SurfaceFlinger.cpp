@@ -5599,6 +5599,12 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
         if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) {
             ALOGW("Couldn't set SCHED_FIFO on display on");
         }
+        // Factory (later CAF, 0xe2724): UIFIRST request for the main thread, priority
+        // value 0x40000 as on the factory.
+        param.sched_priority = 0x40000;
+        if (sched_setparam(0, &param) != 0) {
+            ALOGW("Couldn't set UIFIRST for surfaceflinger");
+        }
     } else {
         if (sched_setscheduler(0, SCHED_OTHER, &param) != 0) {
             ALOGW("Couldn't set SCHED_OTHER on display off");
