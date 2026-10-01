@@ -17,6 +17,9 @@
 
 #include <array>
 #include <fcntl.h>
+// PICO OS 5.13.7: sched_setparam() of the dex2oat child in dexopt(). The factory
+// dexopt.cpp has three more lines up to here (its log line numbers are ours + 3).
+#include <sched.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/capability.h>
@@ -2175,6 +2178,18 @@ int dexopt(const char* dex_path, uid_t uid, const char* pkgname, const char* ins
 
         runner.Exec(DexoptReturnCodes::kDex2oatExec);
     } else {
+        // PICO OS 5.13.7: the factory parent moves the forked dex2oat to the SP_DEX2OAT
+        // cpuset policy (task profiles MaxPerformance, Dex2oatCapacity, MaxIoPriority,
+        // TimerSlackNormal, BlkIOBackground; cpuset dex2oat of the vendor init.picovr.rc),
+        // ignoring the result, then gives it the PICO kernel sched_priority 0x100000.
+        set_cpuset_policy(pid, SP_DEX2OAT);
+        struct sched_param param;
+        param.sched_priority = 0x100000;
+        int ret = sched_setparam(pid, &param);
+        if (ret < 0) {
+            PLOG(ERROR) << "Failed set dexopt cpuset promotion: " << ret;
+        }
+
         int res = wait_child(pid);
         if (res == 0) {
             LOG(VERBOSE) << "DexInv: --- END '" << dex_path << "' (success) ---";
