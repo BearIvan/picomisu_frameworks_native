@@ -287,9 +287,12 @@ public:
             const sp<GraphicBuffer>& buffer) = 0;
 
     // PICO local extension. Concrete queues may implement cached attachment;
-    // the factory base method returns success without changing outSlot.
-    virtual status_t attachCachedBuffer(int* outSlot, const sp<GraphicBuffer>& buffer,
-                                       uint64_t bufferId);
+    // the factory base method returns success without changing outSlot. Inline, as in the
+    // factory headers (every user library carries a local copy, libgui exports none).
+    virtual status_t attachCachedBuffer(int* /*outSlot*/, const sp<GraphicBuffer>& /*buffer*/,
+                                       uint64_t /*bufferId*/) {
+        return NO_ERROR;
+    }
 
     // queueBuffer indicates that the client has finished filling in the
     // contents of the buffer associated with slot and transfers ownership of
@@ -634,8 +637,9 @@ public:
     // NATIVE_WINDOW_CONSUMER_USAGE_BITS attribute.
     virtual status_t getConsumerUsage(uint64_t* outUsage) const = 0;
 
-    // PICO local extension; the factory base implementation does nothing.
-    virtual void listenFreezeSelf();
+    // PICO local extension; the factory base implementation does nothing (inline, as
+    // attachCachedBuffer).
+    virtual void listenFreezeSelf() {}
 
     // Static method exports any IGraphicBufferProducer object to a parcel. It
     // handles null producer as well.
