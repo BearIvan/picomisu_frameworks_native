@@ -38,6 +38,23 @@ struct MonitorItem {
     MonitorItem() : state(0) {}
 };
 
+// Fixed-size history of the monitor (factory android::RingBuffer<T, N>; the constructor of
+// RingBuffer<MonitorItem, 120> is out of line in the factory libgui, 0xd66ec).
+template <typename T, size_t Capacity>
+struct RingBuffer {
+    T items[Capacity];
+    uint64_t index;
+    size_t count;
+    RingBuffer() : index(UINT64_MAX), count(0) {}
+    void clear() { index = UINT64_MAX; count = 0; }
+    void add(const T& item) {
+        index = (index + 1) % Capacity;
+        if (count < Capacity) ++count;
+        items[index] = item;
+    }
+    T& logical(size_t ordinal) { return items[(count + ordinal) % count]; }
+};
+
 class SurfaceMonitor {
 public:
     SurfaceMonitor();
@@ -62,21 +79,6 @@ private:
     SurfaceMonitor(const SurfaceMonitor&) = delete;
     SurfaceMonitor& operator=(const SurfaceMonitor&) = delete;
 
-    template <typename T, size_t Capacity>
-    struct History {
-        T items[Capacity];
-        uint64_t index;
-        size_t count;
-        History() : index(UINT64_MAX), count(0) {}
-        void clear() { index = UINT64_MAX; count = 0; }
-        void add(const T& item) {
-            index = (index + 1) % Capacity;
-            if (count < Capacity) ++count;
-            items[index] = item;
-        }
-        T& logical(size_t ordinal) { return items[(count + ordinal) % count]; }
-    };
-
     [[maybe_unused]] int32_t mLegacyWord;
     // The meaning of these factory bytes is unresolved. None of the inspected
     // monitor routines accesses them. Preserve their observed position rather
@@ -86,9 +88,9 @@ private:
     pid_t mCallingPid;
     sp<IBinder> mTransfer;
     sp<IBinder> mSysTrans;
-    History<MonitorItem, 120> mFrames;
-    History<double, 10> mAverageFps;
-    History<nsecs_t, 60> mFrameDurations;
+    RingBuffer<MonitorItem, 120> mFrames;
+    RingBuffer<double, 10> mAverageFps;
+    RingBuffer<nsecs_t, 60> mFrameDurations;
     nsecs_t mPendingTimes[5];
     nsecs_t mStandardPeriod;
     nsecs_t mPeriods[8];
