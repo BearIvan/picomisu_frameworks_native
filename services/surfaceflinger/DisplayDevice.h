@@ -71,6 +71,10 @@ public:
     // region in screen space
     Region undefinedRegion;
     bool lastCompositionHadVisibleLayers;
+    // PICO (factory +0x61): composition of a display that shows layer stack 0 is skipped when
+    // false. Only the picocast display ("ScreenCastThread-display") can clear it, see
+    // setDisplayName().
+    bool castMirroring = true;
 
     enum {
         NO_LAYER_STACK = 0xFFFFFFFF,
@@ -92,6 +96,10 @@ public:
     // (factory DisplayDevice +0x163d). Cleared when the display is removed.
     bool hasPxrLayer() const { return mHasPxrLayer; }
     void setHasPxrLayer(bool hasPxrLayer) { mHasPxrLayer = hasPxrLayer; }
+    // PICO: the display shows the VR runtime's PXR surface while dual cast is allowed
+    // (factory +0x163e, set by rebuildLayerStacks, cleared when the display is removed).
+    bool isDualCast() const { return mDualCast; }
+    void setDualCast(bool dualCast) { mDualCast = dualCast; }
     // PICO: composed producer frames of this display for the PICO system monitor.
     SysDisplayClient& getSysDisplayClient() { return mSysDisplayClient; }
 
@@ -238,6 +246,7 @@ private:
     SysDisplayClient mSysDisplayClient;
     uint32_t mDisplayFlags = 0;
     bool mHasPxrLayer = false;
+    bool mDualCast = false;
 };
 
 struct DisplayDeviceState {

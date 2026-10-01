@@ -116,6 +116,18 @@ void DisplayDevice::setDisplayName(const std::string& displayName) {
         // never override the name with an empty name
         mDisplayName = displayName;
         mCompositionDisplay->setName(displayName);
+        // PICO (factory 0x90a48): the picocast virtual display mirrors the panel only for the
+        // enterprise binocular cast or when persist.pxr.sf.cast_mirroring is set.
+        ALOGD("Display name:%s", displayName.c_str());
+        if (displayName == "ScreenCastThread-display") {
+            if (property_get_bool("persist.pvr.cast.binocular", false)) {
+                castMirroring = true;
+                ALOGI("find enterprise dual cast...");
+            } else {
+                castMirroring = property_get_bool("persist.pxr.sf.cast_mirroring", false);
+                ALOGD("Find picocast virtual display, mirroring:%d", castMirroring);
+            }
+        }
     }
 }
 

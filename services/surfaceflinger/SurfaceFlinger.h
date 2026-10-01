@@ -1123,6 +1123,9 @@ private:
     std::mutex mPxrLayerMutex;
     wp<Layer> mPxrLayer;
     sp<Layer> getPxrLayer();
+    // PICO: persist.pxr.dual_cast_opt.disable (factory +0x2b88): virtual displays that show
+    // the PXR surface are not marked as dual cast displays.
+    bool mDualCastOptDisabled = false;
     bool mDebugDisableTransformHint = false;
     volatile nsecs_t mDebugInTransaction = 0;
     bool mForceFullDamage = false;

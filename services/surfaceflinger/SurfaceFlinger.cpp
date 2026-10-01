@@ -520,6 +520,13 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
         mUseSmoMo = true;
     }
 
+    // PICO (factory ctor 0xd94c4)
+    property_get("persist.pxr.dual_cast_opt.disable", value, "0");
+    if (atoi(value)) {
+        mDualCastOptDisabled = true;
+        ALOGI("dual cast opt disabled...");
+    }
+
     mDolphinHandle = dlopen("libdolphin.so", RTLD_NOW);
     if (!mDolphinHandle) {
         ALOGW("Unable to open libdolphin.so: %s.", dlerror());
@@ -2861,6 +2868,19 @@ void SurfaceFlinger::rebuildLayerStacks() {
                                                                 layerFE));
                         deprecated_layersSortedByZ.add(layer);
 
+                        // PICO (factory rebuildLayerStacks lambda 0x102b9c): a virtual display
+                        // that shows the VR runtime's PXR surface is a dual cast display.
+                        if (layer->isPxrSurface() && displayDevice->isVirtual() &&
+                            !mDualCastOptDisabled) {
+                            char buffer[1024];
+                            snprintf(buffer, sizeof(buffer), "get dual cast Display: %s layer: %s",
+                                     displayDevice->getDebugName().c_str(),
+                                     layer->getName().string());
+                            ALOGI("%s", buffer);
+                            ATRACE_NAME(buffer);
+                            displayDevice->setDualCast(true);
+                        }
+
                         auto& outputLayerState = layersSortedByZ.back()->editState();
                         outputLayerState.visibleRegion =
                                 tr.transform(layer->visibleRegion.intersect(displayState.viewport));
@@ -3419,6 +3439,9 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                     // Save display ID before disconnecting.
                     const auto displayId = display->getId();
                     display->disconnect();
+                    // PICO (factory 0xed0f0)
+                    display->setDualCast(false);
+                    ALOGI("dual cast display:%s disconnected...", display->getDebugName().c_str());
 
                     if (!display->isVirtual()) {
                         LOG_ALWAYS_FATAL_IF(!displayId);
@@ -4150,6 +4173,13 @@ void SurfaceFlinger::doDisplayComposition(const sp<DisplayDevice>& displayDevice
     // 2) There is work to be done (the dirty region isn't empty)
     if (!displayDevice->getId() && inDirtyRegion.isEmpty()) {
         ALOGV("Skipping display composition");
+        return;
+    }
+
+    // PICO (factory handleMessageRefresh 0xe6300): a non-mirroring picocast display that
+    // shows layer stack 0 is not composed.
+    if (!displayDevice->castMirroring && display->getState().layerStackId == 0) {
+        ALOGD("Skipping mirroring composition");
         return;
     }
 
