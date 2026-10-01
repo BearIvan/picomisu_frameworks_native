@@ -15,7 +15,10 @@
  */
 
 #include <atomic>
+#include <errno.h>
 #include <inttypes.h>
+#include <pthread.h>
+#include <sys/time.h>
 
 #define LOG_TAG "BufferQueueProducer"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
@@ -74,7 +77,7 @@ BufferQueueProducer::~BufferQueueProducer() {
 status_t BufferQueueProducer::requestBuffer(int slot, sp<GraphicBuffer>* buf) {
     ATRACE_CALL();
     BQ_LOGV("requestBuffer: slot %d", slot);
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
 
     if (mCore->mIsAbandoned) {
         BQ_LOGE("requestBuffer: BufferQueue has been abandoned");
@@ -109,7 +112,7 @@ status_t BufferQueueProducer::setMaxDequeuedBufferCount(
 
     sp<IConsumerListener> listener;
     { // Autolock scope
-        std::unique_lock<std::mutex> lock(mCore->mMutex);
+        BufferQueueCore::MutexLock lock(mCore->mMutex);
         if (maxDequeuedBuffers == -2 && mConsumerIsSurfaceFlinger) {
             mPicoSingleLayerDequeues = true;
             return NO_ERROR;
@@ -124,7 +127,7 @@ status_t BufferQueueProducer::setMaxDequeuedBufferCount(
         } else {
             maxDequeuedBuffers = static_cast<int32_t>(adjusted);
         }
-        mCore->waitWhileAllocatingLocked(lock);
+        mCore->waitWhileAllocatingLocked(&mCore->mMutex);
 
         if (mCore->mIsAbandoned) {
             BQ_LOGE("setMaxDequeuedBufferCount: BufferQueue has been "
@@ -185,7 +188,7 @@ status_t BufferQueueProducer::setMaxDequeuedBufferCount(
         if (delta < 0) {
             listener = mCore->mConsumerListener;
         }
-        mCore->mDequeueCondition.notify_all();
+        pthread_cond_broadcast(&mCore->mDequeueCondition);
     } // Autolock scope
 
     // Call back without lock held
@@ -202,8 +205,8 @@ status_t BufferQueueProducer::setAsyncMode(bool async) {
 
     sp<IConsumerListener> listener;
     { // Autolock scope
-        std::unique_lock<std::mutex> lock(mCore->mMutex);
-        mCore->waitWhileAllocatingLocked(lock);
+        BufferQueueCore::MutexLock lock(mCore->mMutex);
+        mCore->waitWhileAllocatingLocked(&mCore->mMutex);
 
         if (mCore->mIsAbandoned) {
             BQ_LOGE("setAsyncMode: BufferQueue has been abandoned");
@@ -237,7 +240,7 @@ status_t BufferQueueProducer::setAsyncMode(bool async) {
         }
         mCore->mAsyncMode = async;
         VALIDATE_CONSISTENCY();
-        mCore->mDequeueCondition.notify_all();
+        pthread_cond_broadcast(&mCore->mDequeueCondition);
         if (delta < 0) {
             listener = mCore->mConsumerListener;
         }
@@ -278,7 +281,7 @@ int BufferQueueProducer::getFreeSlotLocked() const {
 }
 
 status_t BufferQueueProducer::waitForFreeSlotThenRelock(FreeSlotCaller caller,
-        std::unique_lock<std::mutex>& lock, int* found, bool* outBufferReleased) const {
+        pthread_mutex_t* mutex, int* found, bool* outBufferReleased) const {
     auto callerString = (caller == FreeSlotCaller::Dequeue) ?
             "dequeueBuffer" : "attachBuffer";
     bool tryAgain = true;
@@ -304,12 +307,13 @@ status_t BufferQueueProducer::waitForFreeSlotThenRelock(FreeSlotCaller caller,
         // This check is only done if a buffer has already been queued
         if (mCore->mBufferHasBeenQueued &&
                 dequeuedCount >= mCore->mMaxDequeuedBufferCount) {
+            // Suppress error logs when timeout is non-negative. The factory logs this
+            // before it checks for a pending self unfreeze.
+            if (mDequeueTimeout < 0) {
+                BQ_LOGE("%s: attempting to exceed the max dequeued buffer "
+                        "count (%d)", callerString, mCore->mMaxDequeuedBufferCount);
+            }
             if (!mPicoUnfreezePending->exchange(false, std::memory_order_relaxed)) {
-                // Suppress error logs when timeout is non-negative.
-                if (mDequeueTimeout < 0) {
-                    BQ_LOGE("%s: attempting to exceed the max dequeued buffer "
-                            "count (%d)", callerString, mCore->mMaxDequeuedBufferCount);
-                }
                 return INVALID_OPERATION;
             }
             // PICO cancels the last producer-owned active slot after unfreeze.
@@ -419,13 +423,23 @@ status_t BufferQueueProducer::waitForFreeSlotThenRelock(FreeSlotCaller caller,
                 return WOULD_BLOCK;
             }
             if (mDequeueTimeout >= 0) {
-                std::cv_status result = mCore->mDequeueCondition.wait_for(lock,
-                        std::chrono::nanoseconds(mDequeueTimeout));
-                if (result == std::cv_status::timeout) {
+                // Factory: absolute CLOCK_REALTIME deadline from gettimeofday().
+                constexpr nsecs_t kNsPerSec = 1000000000;
+                struct timeval now;
+                gettimeofday(&now, nullptr);
+                struct timespec deadline;
+                deadline.tv_sec = now.tv_sec + static_cast<int>(mDequeueTimeout / kNsPerSec);
+                deadline.tv_nsec = now.tv_usec * 1000 + mDequeueTimeout % kNsPerSec;
+                if (deadline.tv_nsec > kNsPerSec - 1) {
+                    deadline.tv_nsec -= kNsPerSec;
+                    deadline.tv_sec += 1;
+                }
+                if (pthread_cond_timedwait(&mCore->mDequeueCondition, mutex, &deadline) ==
+                        ETIMEDOUT) {
                     return TIMED_OUT;
                 }
             } else {
-                mCore->mDequeueCondition.wait(lock);
+                pthread_cond_wait(&mCore->mDequeueCondition, mutex);
             }
         }
     } // while (tryAgain)
@@ -439,7 +453,7 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
                                             FrameEventHistoryDelta* outTimestamps) {
     ATRACE_CALL();
     { // Autolock scope
-        std::lock_guard<std::mutex> lock(mCore->mMutex);
+        BufferQueueCore::MutexLock lock(mCore->mMutex);
         mConsumerName = mCore->mConsumerName;
 
         if (mCore->mIsAbandoned) {
@@ -468,15 +482,15 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
     bool bufferReleased = false;
 
     { // Autolock scope
-        std::unique_lock<std::mutex> lock(mCore->mMutex);
+        BufferQueueCore::MutexLock lock(mCore->mMutex);
 
         // If we don't have a free buffer, but we are currently allocating, we wait until allocation
         // is finished such that we don't allocate in parallel.
         if (mCore->mFreeBuffers.empty() && mCore->mIsAllocating) {
             mDequeueWaitingForAllocation = true;
-            mCore->waitWhileAllocatingLocked(lock);
+            mCore->waitWhileAllocatingLocked(&mCore->mMutex);
             mDequeueWaitingForAllocation = false;
-            mDequeueWaitingForAllocationCondition.notify_all();
+            pthread_cond_broadcast(&mDequeueWaitingForAllocationCondition);
         }
 
         if (format == 0) {
@@ -494,7 +508,8 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
 
         int found = BufferItem::INVALID_BUFFER_SLOT;
         while (found == BufferItem::INVALID_BUFFER_SLOT) {
-            status_t status = waitForFreeSlotThenRelock(FreeSlotCaller::Dequeue, lock, &found,
+            status_t status = waitForFreeSlotThenRelock(FreeSlotCaller::Dequeue,
+                                                        &mCore->mMutex, &found,
                                                         &bufferReleased);
             if (status != NO_ERROR) {
                 return status;
@@ -598,7 +613,7 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
     if (bufferReleased) {
         sp<IConsumerListener> listener;
         {
-            std::lock_guard<std::mutex> lock(mCore->mMutex);
+            BufferQueueCore::MutexLock lock(mCore->mMutex);
             listener = mCore->mConsumerListener;
         }
         if (listener != nullptr) {
@@ -615,7 +630,7 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
         status_t error = graphicBuffer->initCheck();
 
         { // Autolock scope
-            std::lock_guard<std::mutex> lock(mCore->mMutex);
+            BufferQueueCore::MutexLock lock(mCore->mMutex);
 
             if (error == NO_ERROR && !mCore->mIsAbandoned) {
                 graphicBuffer->setGenerationNumber(mCore->mGenerationNumber);
@@ -623,7 +638,7 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
             }
 
             mCore->mIsAllocating = false;
-            mCore->mIsAllocatingCondition.notify_all();
+            pthread_cond_broadcast(&mCore->mIsAllocatingCondition);
 
             if (error != NO_ERROR) {
                 mCore->mFreeSlots.insert(*outSlot);
@@ -692,12 +707,17 @@ void BufferQueueProducer::waitForFenceReadyBufferLocked(int slot, sp<Fence>* out
         mSlots[slot].mPicoFenceReady = false;
         mSlots[slot].mPicoReadyFence = Fence::NO_FENCE;
     } else {
+        // Factory: the CLOCK_REALTIME deadline is gettimeofday() + 13,880,000 ns with no
+        // tv_nsec carry. When tv_usec >= 986120 the deadline is invalid, the wait returns
+        // EINVAL at once and the wake-up path below runs (as in the factory).
+        struct timeval now;
+        gettimeofday(&now, nullptr);
+        struct timespec deadline;
+        deadline.tv_sec = now.tv_sec;
+        deadline.tv_nsec = now.tv_usec * 1000 + 13880000;
         const nsecs_t waitStart = systemTime(SYSTEM_TIME_MONOTONIC);
-        std::unique_lock<std::mutex> adopted(mCore->mMutex, std::adopt_lock);
-        timeout = mCore->mPicoFenceCondition.wait_for(adopted,
-                std::chrono::nanoseconds(13'880'000)) == std::cv_status::timeout;
-        // Preserve ownership in the caller's existing lock.
-        adopted.release();
+        timeout = pthread_cond_timedwait(&mCore->mPicoFenceCondition, &mCore->mMutex,
+                                         &deadline) == ETIMEDOUT;
         buffer = mSlots[slot].mGraphicBuffer;
         if (buffer == nullptr) return;
         if (timeout) {
@@ -739,7 +759,7 @@ status_t BufferQueueProducer::detachBuffer(int slot) {
 
     sp<IConsumerListener> listener;
     {
-        std::lock_guard<std::mutex> lock(mCore->mMutex);
+        BufferQueueCore::MutexLock lock(mCore->mMutex);
 
         if (mCore->mIsAbandoned) {
             BQ_LOGE("detachBuffer: BufferQueue has been abandoned");
@@ -774,7 +794,7 @@ status_t BufferQueueProducer::detachBuffer(int slot) {
         mCore->mActiveBuffers.erase(slot);
         mCore->mFreeSlots.insert(slot);
         mCore->clearBufferSlotLocked(slot);
-        mCore->mDequeueCondition.notify_all();
+        pthread_cond_broadcast(&mCore->mDequeueCondition);
         VALIDATE_CONSISTENCY();
         listener = mCore->mConsumerListener;
     }
@@ -800,7 +820,7 @@ status_t BufferQueueProducer::detachNextBuffer(sp<GraphicBuffer>* outBuffer,
 
     sp<IConsumerListener> listener;
     {
-        std::unique_lock<std::mutex> lock(mCore->mMutex);
+        BufferQueueCore::MutexLock lock(mCore->mMutex);
 
         if (mCore->mIsAbandoned) {
             BQ_LOGE("detachNextBuffer: BufferQueue has been abandoned");
@@ -818,7 +838,7 @@ status_t BufferQueueProducer::detachNextBuffer(sp<GraphicBuffer>* outBuffer,
             return BAD_VALUE;
         }
 
-        mCore->waitWhileAllocatingLocked(lock);
+        mCore->waitWhileAllocatingLocked(&mCore->mMutex);
 
         if (mCore->mFreeBuffers.empty()) {
             return NO_MEMORY;
@@ -856,7 +876,7 @@ status_t BufferQueueProducer::attachBuffer(int* outSlot,
         return BAD_VALUE;
     }
 
-    std::unique_lock<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
 
     if (mCore->mIsAbandoned) {
         BQ_LOGE("attachBuffer: BufferQueue has been abandoned");
@@ -880,12 +900,13 @@ status_t BufferQueueProducer::attachBuffer(int* outSlot,
         return BAD_VALUE;
     }
 
-    mCore->waitWhileAllocatingLocked(lock);
+    mCore->waitWhileAllocatingLocked(&mCore->mMutex);
 
     status_t returnFlags = NO_ERROR;
     int found;
-    status_t status = waitForFreeSlotThenRelock(FreeSlotCaller::Attach, lock, &found);
+    status_t status = waitForFreeSlotThenRelock(FreeSlotCaller::Attach, &mCore->mMutex, &found);
     if (status != NO_ERROR) {
+        BQ_LOGE("attachBuffer: waitForFreeSlotThenRelock fail");
         return status;
     }
 
@@ -914,9 +935,26 @@ status_t BufferQueueProducer::attachBuffer(int* outSlot,
 }
 
 namespace {
-// Factory uses a process-wide access counter. Atomic ordering also covers
-// accesses protected by different BufferQueueCore mutexes.
+// Factory uses a process-wide access counter (a plain uint64_t). Atomic ordering also
+// covers accesses protected by different BufferQueueCore mutexes.
 std::atomic<uint64_t> sBufferCacheAccess{0};
+}
+
+uint64_t BufferQueueProducer::getCounter() {
+    return sBufferCacheAccess.fetch_add(1, std::memory_order_relaxed);
+}
+
+void BufferQueueProducer::clearAllCachedBuffersLocked() {
+    mBufferCache.clear();
+}
+
+void BufferQueueProducer::dumpBuffers() {
+    ALOGD("===start dump cached buffers===");
+    for (auto entry : mBufferCache) {
+        ALOGD("[%" PRIu64 ", sp %p, counter %" PRIu64 "]", entry.first,
+              entry.second.first.get(), entry.second.second);
+    }
+    ALOGD("===end dump cached buffers===");
 }
 
 status_t BufferQueueProducer::queryBufferLocked(uint64_t id) {
@@ -929,7 +967,7 @@ void BufferQueueProducer::fetchBufferLocked(uint64_t id, sp<GraphicBuffer>* buff
         buffer->clear();
         return;
     }
-    entry->second.second = sBufferCacheAccess.fetch_add(1, std::memory_order_relaxed);
+    entry->second.second = getCounter();
     *buffer = entry->second.first;
 }
 
@@ -945,26 +983,50 @@ void BufferQueueProducer::evictBuffer() {
 void BufferQueueProducer::cacheBufferLocked(const sp<GraphicBuffer>& buffer) {
     // Factory evicts before checking whether the inserted ID already exists.
     if (mBufferCache.size() >= 5) evictBuffer();
-    mBufferCache[buffer->getId()] = {
-            buffer, sBufferCacheAccess.fetch_add(1, std::memory_order_relaxed)};
+    mBufferCache[buffer->getId()] = {buffer, getCounter()};
 }
 
 status_t BufferQueueProducer::attachCachedBuffer(int* outSlot, const sp<GraphicBuffer>& buffer,
                                                 uint64_t id) {
     ATRACE_CALL();
-    if (!outSlot || (!buffer && id == 0)) return BAD_VALUE;
-    std::unique_lock<std::mutex> lock(mCore->mMutex);
-    if (mCore->mIsAbandoned || mCore->mConnectedApi == BufferQueueCore::NO_CONNECTED_API) {
+    if (outSlot == nullptr) {
+        BQ_LOGE("attachCachedBuffer: outSlot must not be NULL");
+        return BAD_VALUE;
+    }
+    if (buffer == nullptr && id == 0) {
+        BQ_LOGE("attachCachedBuffer: buffer and id are both NULL");
+        return BAD_VALUE;
+    }
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
+    if (mCore->mIsAbandoned) {
+        BQ_LOGE("attachCachedBuffer: BufferQueue has been abandoned");
         return NO_INIT;
     }
-    if (mCore->mSharedBufferMode) return BAD_VALUE;
-    if (id != 0 && !buffer && queryBufferLocked(id) == NAME_NOT_FOUND) return NAME_NOT_FOUND;
-    mCore->waitWhileAllocatingLocked(lock);
+    if (mCore->mConnectedApi == BufferQueueCore::NO_CONNECTED_API) {
+        BQ_LOGE("attachCachedBuffer: BufferQueue has no connected producer");
+        return NO_INIT;
+    }
+    if (mCore->mSharedBufferMode) {
+        BQ_LOGE("attachCachedBuffer: cannot attach a buffer in shared buffer mode");
+        return BAD_VALUE;
+    }
+    // An id that is not cached fails without a log, as in the factory.
+    if (id != 0 && buffer == nullptr && queryBufferLocked(id) == NAME_NOT_FOUND) {
+        return NAME_NOT_FOUND;
+    }
+    mCore->waitWhileAllocatingLocked(&mCore->mMutex);
     int found;
-    status_t status = waitForFreeSlotThenRelock(FreeSlotCaller::Attach, lock, &found);
-    if (status != NO_ERROR) return status;
-    if (found == BufferQueueCore::INVALID_BUFFER_SLOT) return -EBUSY;
+    status_t status = waitForFreeSlotThenRelock(FreeSlotCaller::Attach, &mCore->mMutex, &found);
+    if (status != NO_ERROR) {
+        BQ_LOGE("attachCachedBuffer: waitForFreeSlotThenRelock fail %d", status);
+        return status;
+    }
+    if (found == BufferQueueCore::INVALID_BUFFER_SLOT) {
+        BQ_LOGE("attachCachedBuffer: no available buffer slots");
+        return -EBUSY;
+    }
     *outSlot = found;
+    ATRACE_BUFFER_INDEX(*outSlot);
     if (id != 0) {
         if (buffer) {
             cacheBufferLocked(buffer);
@@ -1033,7 +1095,7 @@ status_t BufferQueueProducer::queueBuffer(int slot,
     BufferItem item;
     bool picoConsumer = false;
     { // Autolock scope
-        std::lock_guard<std::mutex> lock(mCore->mMutex);
+        BufferQueueCore::MutexLock lock(mCore->mMutex);
 
         if (mCore->mIsAbandoned) {
             BQ_LOGE("queueBuffer: BufferQueue has been abandoned");
@@ -1195,7 +1257,7 @@ status_t BufferQueueProducer::queueBuffer(int slot,
         }
 
         mCore->mBufferHasBeenQueued = true;
-        mCore->mDequeueCondition.notify_all();
+        pthread_cond_broadcast(&mCore->mDequeueCondition);
         mCore->mLastQueuedSlot = slot;
 
         output->width = mCore->mDefaultWidth;
@@ -1290,7 +1352,7 @@ status_t BufferQueueProducer::queueBuffer(int slot,
 status_t BufferQueueProducer::cancelBuffer(int slot, const sp<Fence>& fence) {
     ATRACE_CALL();
     BQ_LOGV("cancelBuffer: slot %d", slot);
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
 
     if (mCore->mIsAbandoned) {
         BQ_LOGE("cancelBuffer: BufferQueue has been abandoned");
@@ -1335,7 +1397,7 @@ status_t BufferQueueProducer::cancelBuffer(int slot, const sp<Fence>& fence) {
     }
 
     mSlots[slot].mFence = fence;
-    mCore->mDequeueCondition.notify_all();
+    pthread_cond_broadcast(&mCore->mDequeueCondition);
     VALIDATE_CONSISTENCY();
 
     return NO_ERROR;
@@ -1343,7 +1405,7 @@ status_t BufferQueueProducer::cancelBuffer(int slot, const sp<Fence>& fence) {
 
 int BufferQueueProducer::query(int what, int *outValue) {
     ATRACE_CALL();
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
 
     if (outValue == nullptr) {
         BQ_LOGE("query: outValue was NULL");
@@ -1415,7 +1477,7 @@ int BufferQueueProducer::query(int what, int *outValue) {
 status_t BufferQueueProducer::connect(const sp<IProducerListener>& listener,
         int api, bool producerControlledByApp, QueueBufferOutput *output) {
     ATRACE_CALL();
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     mConsumerName = mCore->mConsumerName;
     BQ_LOGV("connect: api=%d producerControlledByApp=%s", api,
             producerControlledByApp ? "true" : "false");
@@ -1506,12 +1568,17 @@ status_t BufferQueueProducer::connect(const sp<IProducerListener>& listener,
 
 status_t BufferQueueProducer::disconnect(int api, DisconnectMode mode) {
     ATRACE_CALL();
-    BQ_LOGV("disconnect: api %d", api);
+    // Factory: logged for every producer whose consumer is not SurfaceFlinger, before the
+    // queue mutex is taken.
+    if (!mConsumerIsSurfaceFlinger) {
+        BQ_LOGI("disconnect: api %d, w*h = %d * %d", api, mCore->mDefaultWidth,
+                mCore->mDefaultHeight);
+    }
 
     int status = NO_ERROR;
     sp<IConsumerListener> listener;
     { // Autolock scope
-        std::unique_lock<std::mutex> lock(mCore->mMutex);
+        BufferQueueCore::MutexLock lock(mCore->mMutex);
 
         if (mode == DisconnectMode::AllLocal) {
             if (BufferQueueThreadState::getCallingPid() != mCore->mConnectedPid) {
@@ -1520,7 +1587,7 @@ status_t BufferQueueProducer::disconnect(int api, DisconnectMode mode) {
             api = BufferQueueCore::CURRENTLY_CONNECTED_API;
         }
 
-        mCore->waitWhileAllocatingLocked(lock);
+        mCore->waitWhileAllocatingLocked(&mCore->mMutex);
 
         if (mCore->mIsAbandoned) {
             // It's not really an error to disconnect after the surface has
@@ -1546,6 +1613,31 @@ status_t BufferQueueProducer::disconnect(int api, DisconnectMode mode) {
             case NATIVE_WINDOW_API_MEDIA:
             case NATIVE_WINDOW_API_CAMERA:
                 if (mCore->mConnectedApi == api) {
+                    // PICO (factory 0x79538..0x797dc): first drop the active slots that
+                    // hold a cached-attach buffer (usage type 0x1 in bits 32-35), then the
+                    // queued items whose slot still holds such a buffer.
+                    for (auto it = mCore->mActiveBuffers.begin();
+                            it != mCore->mActiveBuffers.end();) {
+                        const int s = *it;
+                        const sp<GraphicBuffer>& active = mSlots[s].mGraphicBuffer;
+                        if (active != nullptr &&
+                                (active->getUsage() & 0xf00000000ULL) == 0x100000000ULL) {
+                            mCore->mFreeSlots.insert(s);
+                            mCore->clearBufferSlotLocked(s);
+                            it = mCore->mActiveBuffers.erase(it);
+                        } else {
+                            ++it;
+                        }
+                    }
+                    for (auto it = mCore->mQueue.begin(); it != mCore->mQueue.end();) {
+                        const sp<GraphicBuffer>& queued = mSlots[it->mSlot].mGraphicBuffer;
+                        if (queued != nullptr &&
+                                (queued->getUsage() & 0xf00000000ULL) == 0x100000000ULL) {
+                            it = mCore->mQueue.erase(it);
+                        } else {
+                            ++it;
+                        }
+                    }
                     mCore->freeAllBuffersLocked();
 
                     // Remove our death notification callback if we have one
@@ -1564,9 +1656,9 @@ status_t BufferQueueProducer::disconnect(int api, DisconnectMode mode) {
                     mCore->mConnectedApi = BufferQueueCore::NO_CONNECTED_API;
                     mCore->mConnectedPid = -1;
                     mCore->mSidebandStream.clear();
-                    mCore->mDequeueCondition.notify_all();
-                    mCore->mPicoFenceCondition.notify_all();
-                    mBufferCache.clear();
+                    pthread_cond_broadcast(&mCore->mDequeueCondition);
+                    pthread_cond_broadcast(&mCore->mPicoFenceCondition);
+                    clearAllCachedBuffersLocked();
                     listener = mCore->mConsumerListener;
                 } else if (mCore->mConnectedApi == BufferQueueCore::NO_CONNECTED_API) {
                     BQ_LOGE("disconnect: not connected (req=%d)", api);
@@ -1596,7 +1688,7 @@ status_t BufferQueueProducer::disconnect(int api, DisconnectMode mode) {
 status_t BufferQueueProducer::setSidebandStream(const sp<NativeHandle>& stream) {
     sp<IConsumerListener> listener;
     { // Autolock scope
-        std::lock_guard<std::mutex> _l(mCore->mMutex);
+        BufferQueueCore::MutexLock _l(mCore->mMutex);
         mCore->mSidebandStream = stream;
         listener = mCore->mConsumerListener;
     } // Autolock scope
@@ -1618,8 +1710,8 @@ void BufferQueueProducer::allocateBuffers(uint32_t width, uint32_t height,
         uint64_t allocUsage = 0;
         std::string allocName;
         { // Autolock scope
-            std::unique_lock<std::mutex> lock(mCore->mMutex);
-            mCore->waitWhileAllocatingLocked(lock);
+            BufferQueueCore::MutexLock lock(mCore->mMutex);
+            mCore->waitWhileAllocatingLocked(&mCore->mMutex);
 
             if (!mCore->mAllowAllocation) {
                 BQ_LOGE("allocateBuffers: allocation is not allowed for this "
@@ -1654,16 +1746,16 @@ void BufferQueueProducer::allocateBuffers(uint32_t width, uint32_t height,
             if (result != NO_ERROR) {
                 BQ_LOGE("allocateBuffers: failed to allocate buffer (%u x %u, format"
                         " %u, usage %#" PRIx64 ")", width, height, format, usage);
-                std::lock_guard<std::mutex> lock(mCore->mMutex);
+                BufferQueueCore::MutexLock lock(mCore->mMutex);
                 mCore->mIsAllocating = false;
-                mCore->mIsAllocatingCondition.notify_all();
+                pthread_cond_broadcast(&mCore->mIsAllocatingCondition);
                 return;
             }
             buffers.push_back(graphicBuffer);
         }
 
         { // Autolock scope
-            std::unique_lock<std::mutex> lock(mCore->mMutex);
+            BufferQueueCore::MutexLock lock(mCore->mMutex);
             uint32_t checkWidth = width > 0 ? width : mCore->mDefaultWidth;
             uint32_t checkHeight = height > 0 ? height : mCore->mDefaultHeight;
             PixelFormat checkFormat = format != 0 ?
@@ -1674,7 +1766,7 @@ void BufferQueueProducer::allocateBuffers(uint32_t width, uint32_t height,
                 // Something changed while we released the lock. Retry.
                 BQ_LOGV("allocateBuffers: size/format/usage changed while allocating. Retrying.");
                 mCore->mIsAllocating = false;
-                mCore->mIsAllocatingCondition.notify_all();
+                pthread_cond_broadcast(&mCore->mIsAllocatingCondition);
                 continue;
             }
 
@@ -1702,13 +1794,13 @@ void BufferQueueProducer::allocateBuffers(uint32_t width, uint32_t height,
             }
 
             mCore->mIsAllocating = false;
-            mCore->mIsAllocatingCondition.notify_all();
+            pthread_cond_broadcast(&mCore->mIsAllocatingCondition);
             VALIDATE_CONSISTENCY();
 
             // If dequeue is waiting for to allocate a buffer, release the lock until it's not
             // waiting anymore so it can use the buffer we just allocated.
             while (mDequeueWaitingForAllocation) {
-                mDequeueWaitingForAllocationCondition.wait(lock);
+                pthread_cond_wait(&mDequeueWaitingForAllocationCondition, &mCore->mMutex);
             }
         } // Autolock scope
     }
@@ -1718,7 +1810,7 @@ status_t BufferQueueProducer::allowAllocation(bool allow) {
     ATRACE_CALL();
     BQ_LOGV("allowAllocation: %s", allow ? "true" : "false");
 
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     mCore->mAllowAllocation = allow;
     return NO_ERROR;
 }
@@ -1727,14 +1819,14 @@ status_t BufferQueueProducer::setGenerationNumber(uint32_t generationNumber) {
     ATRACE_CALL();
     BQ_LOGV("setGenerationNumber: %u", generationNumber);
 
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     mCore->mGenerationNumber = generationNumber;
     return NO_ERROR;
 }
 
 String8 BufferQueueProducer::getConsumerName() const {
     ATRACE_CALL();
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     BQ_LOGV("getConsumerName: %s", mConsumerName.string());
     return mConsumerName;
 }
@@ -1743,7 +1835,7 @@ status_t BufferQueueProducer::setSharedBufferMode(bool sharedBufferMode) {
     ATRACE_CALL();
     BQ_LOGV("setSharedBufferMode: %d", sharedBufferMode);
 
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     if (!sharedBufferMode) {
         mCore->mSharedBufferSlot = BufferQueueCore::INVALID_BUFFER_SLOT;
     }
@@ -1755,7 +1847,7 @@ status_t BufferQueueProducer::setAutoRefresh(bool autoRefresh) {
     ATRACE_CALL();
     BQ_LOGV("setAutoRefresh: %d", autoRefresh);
 
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
 
     mCore->mAutoRefresh = autoRefresh;
     return NO_ERROR;
@@ -1765,7 +1857,7 @@ status_t BufferQueueProducer::setDequeueTimeout(nsecs_t timeout) {
     ATRACE_CALL();
     BQ_LOGV("setDequeueTimeout: %" PRId64, timeout);
 
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     bool dequeueBufferCannotBlock =
             timeout >= 0 ? false : mCore->mDequeueBufferCannotBlock;
     int delta = mCore->getMaxBufferCountLocked(mCore->mAsyncMode, dequeueBufferCannotBlock,
@@ -1790,7 +1882,7 @@ status_t BufferQueueProducer::setLegacyBufferDrop(bool drop) {
     ATRACE_CALL();
     BQ_LOGV("setLegacyBufferDrop: drop = %d", drop);
 
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     mCore->mLegacyBufferDrop = drop;
     return NO_ERROR;
 }
@@ -1800,7 +1892,7 @@ status_t BufferQueueProducer::getLastQueuedBuffer(sp<GraphicBuffer>* outBuffer,
     ATRACE_CALL();
     BQ_LOGV("getLastQueuedBuffer");
 
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     if (mCore->mLastQueuedSlot == BufferItem::INVALID_BUFFER_SLOT) {
         *outBuffer = nullptr;
         *outFence = Fence::NO_FENCE;
@@ -1836,7 +1928,7 @@ void BufferQueueProducer::addAndGetFrameTimestamps(
     BQ_LOGV("addAndGetFrameTimestamps");
     sp<IConsumerListener> listener;
     {
-        std::lock_guard<std::mutex> lock(mCore->mMutex);
+        BufferQueueCore::MutexLock lock(mCore->mMutex);
         listener = mCore->mConsumerListener;
     }
     if (listener != nullptr) {
@@ -1863,7 +1955,7 @@ status_t BufferQueueProducer::getUniqueId(uint64_t* outId) const {
 status_t BufferQueueProducer::getConsumerUsage(uint64_t* outUsage) const {
     BQ_LOGV("getConsumerUsage");
 
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     *outUsage = mCore->mConsumerUsageBits;
     return NO_ERROR;
 }

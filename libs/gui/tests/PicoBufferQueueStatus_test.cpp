@@ -13,7 +13,6 @@
 #include <system/window.h>
 
 #include <limits>
-#include <mutex>
 
 namespace android {
 namespace {
@@ -67,31 +66,31 @@ protected:
         consumer = new BufferQueueConsumer(core);
     }
     int status() {
-        std::lock_guard<std::mutex> lock(core->mMutex);
+        BufferQueueCore::MutexLock lock(core->mMutex);
         return core->mPicoVrStatus;
     }
     int defaultWidth() {
-        std::lock_guard<std::mutex> lock(core->mMutex);
+        BufferQueueCore::MutexLock lock(core->mMutex);
         return static_cast<int>(core->mDefaultWidth);
     }
     void abandon() {
-        std::lock_guard<std::mutex> lock(core->mMutex);
+        BufferQueueCore::MutexLock lock(core->mMutex);
         core->mIsAbandoned = true;
     }
     int otherStatus(const sp<BufferQueueCore>& other) {
-        std::lock_guard<std::mutex> lock(other->mMutex);
+        BufferQueueCore::MutexLock lock(other->mMutex);
         return other->mPicoVrStatus;
     }
     bool isPicoConsumer() {
-        std::lock_guard<std::mutex> lock(core->mMutex);
+        BufferQueueCore::MutexLock lock(core->mMutex);
         return core->mHasPicoConsumer;
     }
     int consumerId() {
-        std::lock_guard<std::mutex> lock(core->mMutex);
+        BufferQueueCore::MutexLock lock(core->mMutex);
         return core->mPicoConsumerId;
     }
     bool consumerLogging() {
-        std::lock_guard<std::mutex> lock(core->mMutex);
+        BufferQueueCore::MutexLock lock(core->mMutex);
         return core->mPicoConsumerLogging;
     }
     status_t configureConsumer(int id, int logging) {
@@ -216,13 +215,16 @@ TEST_F(PicoBufferQueueStatusTest, ConsumerRejectsWrongInterfaceToken) {
     EXPECT_FALSE(isPicoConsumer());
 }
 
-TEST_F(PicoBufferQueueStatusTest, ConsumerRejectsIncompleteConfiguration) {
+TEST_F(PicoBufferQueueStatusTest, ConsumerAcceptsIncompleteConfigurationLikeFactory) {
+    // The factory reads both values with Parcel::readInt32() and does not check the
+    // parcel status: a missing log flag reads as 0.
     Parcel data, reply;
     data.writeInterfaceToken(consumer->getInterfaceDescriptor());
     data.writeInt32(99);
-    EXPECT_EQ(BAD_VALUE, IInterface::asBinder(consumer)->transact(10000, data, &reply));
-    EXPECT_FALSE(isPicoConsumer());
-    EXPECT_EQ(0, consumerId());
+    EXPECT_EQ(NO_ERROR, IInterface::asBinder(consumer)->transact(10000, data, &reply));
+    EXPECT_TRUE(isPicoConsumer());
+    EXPECT_EQ(99, consumerId());
+    EXPECT_FALSE(consumerLogging());
 }
 
 TEST_F(PicoBufferQueueStatusTest, StandardConsumerBinderCommandsStillWork) {

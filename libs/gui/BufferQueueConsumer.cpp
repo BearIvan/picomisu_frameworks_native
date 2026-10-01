@@ -58,17 +58,16 @@ status_t BufferQueueConsumer::onTransact(uint32_t code, const Parcel& data,
         return BnGraphicBufferConsumer::onTransact(code, data, reply, flags);
     }
     CHECK_INTERFACE(IGraphicBufferConsumer, data, reply);
-    int32_t consumerId, logging;
-    if (data.readInt32(&consumerId) != NO_ERROR ||
-        data.readInt32(&logging) != NO_ERROR) {
-        return BAD_VALUE;
-    }
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    // Factory (ImageManagerExt): a VrCompositor consumer sends its id and a log flag.
+    // The factory reads both values without checking the parcel status.
+    const int32_t consumerId = data.readInt32();
+    const int32_t logging = data.readInt32();
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     mCore->mPicoConsumerId = consumerId;
     mCore->mPicoConsumerLogging = logging == 1;
     mCore->mHasPicoConsumer = true;
     if (mCore->mPicoConsumerLogging) {
-        BQ_LOGI("PICO consumer configured: id=%d", consumerId);
+        ALOGI("ImageManagerExt init: consumer is VrCompositor %d", mCore->mPicoConsumerId);
     }
     return NO_ERROR;
 }
@@ -80,7 +79,7 @@ status_t BufferQueueConsumer::acquireBuffer(BufferItem* outBuffer,
     int numDroppedBuffers = 0;
     sp<IProducerListener> listener;
     {
-        std::unique_lock<std::mutex> lock(mCore->mMutex);
+        BufferQueueCore::MutexLock lock(mCore->mMutex);
 
         // Check that the consumer doesn't currently have the maximum number of
         // buffers acquired. We allow the max buffer count to be exceeded by one
@@ -226,7 +225,7 @@ status_t BufferQueueConsumer::acquireBuffer(BufferItem* outBuffer,
 
         if (sharedBufferAvailable && mCore->mQueue.empty()) {
             // make sure the buffer has finished allocating before acquiring it
-            mCore->waitWhileAllocatingLocked(lock);
+            mCore->waitWhileAllocatingLocked(&mCore->mMutex);
 
             slot = mCore->mSharedBufferSlot;
 
@@ -287,7 +286,7 @@ status_t BufferQueueConsumer::acquireBuffer(BufferItem* outBuffer,
         // We might have freed a slot while dropping old buffers, or the producer
         // may be blocked waiting for the number of buffers in the queue to
         // decrease.
-        mCore->mDequeueCondition.notify_all();
+        pthread_cond_broadcast(&mCore->mDequeueCondition);
 
         ATRACE_INT(mCore->mConsumerName.string(),
                 static_cast<int32_t>(mCore->mQueue.size()));
@@ -309,7 +308,7 @@ status_t BufferQueueConsumer::detachBuffer(int slot) {
     ATRACE_CALL();
     ATRACE_BUFFER_INDEX(slot);
     BQ_LOGV("detachBuffer: slot %d", slot);
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     return detachBufferLocked(slot);
 }
 
@@ -338,7 +337,7 @@ status_t BufferQueueConsumer::detachBufferLocked(int slot) {
     mCore->mActiveBuffers.erase(slot);
     mCore->mFreeSlots.insert(slot);
     mCore->clearBufferSlotLocked(slot);
-    mCore->mDequeueCondition.notify_all();
+    pthread_cond_broadcast(&mCore->mDequeueCondition);
     VALIDATE_CONSISTENCY();
 
     return NO_ERROR;
@@ -356,7 +355,7 @@ status_t BufferQueueConsumer::attachBuffer(int* outSlot,
         return BAD_VALUE;
     }
 
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
 
     if (mCore->mSharedBufferMode) {
         BQ_LOGE("attachBuffer: cannot attach a buffer in shared buffer mode");
@@ -372,6 +371,10 @@ status_t BufferQueueConsumer::attachBuffer(int* outSlot,
     }
 
     if (numAcquiredBuffers >= mCore->mMaxAcquiredBufferCount + 1) {
+        if (mCore->mPicoConsumerLogging) {
+            ALOGI("ImageManagerExt: max acquired buffer count reached: %d, %d",
+                  numAcquiredBuffers, mCore->mPicoConsumerId);
+        }
         BQ_LOGE("attachBuffer: max acquired buffer count reached: %d "
                 "(max %d)", numAcquiredBuffers,
                 mCore->mMaxAcquiredBufferCount);
@@ -451,7 +454,7 @@ status_t BufferQueueConsumer::releaseBuffer(int slot, uint64_t frameNumber,
     uint64_t bufferId = 0;
     status_t detachResult = NO_ERROR;
     { // Autolock scope
-        std::lock_guard<std::mutex> lock(mCore->mMutex);
+        BufferQueueCore::MutexLock lock(mCore->mMutex);
 
         // If the frame number has changed because the buffer has been reallocated,
         // we can ignore this releaseBuffer for the old buffer.
@@ -499,7 +502,7 @@ status_t BufferQueueConsumer::releaseBuffer(int slot, uint64_t frameNumber,
             }
             BQ_LOGV("releaseBuffer: releasing slot %d", slot);
 
-            mCore->mDequeueCondition.notify_all();
+            pthread_cond_broadcast(&mCore->mDequeueCondition);
             VALIDATE_CONSISTENCY();
         }
     } // Autolock scope
@@ -525,7 +528,7 @@ status_t BufferQueueConsumer::notifyFenceReady(const sp<Fence>& fence,
               fence != nullptr ? fence->isValid() : 0, bufferId);
         return NO_ERROR;
     }
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     const sp<GraphicBuffer>& buffer = mSlots[slot].mGraphicBuffer;
     if (buffer == nullptr) {
         ALOGE("notifyFenceReady fail! buffer null %p", buffer.get());
@@ -535,7 +538,7 @@ status_t BufferQueueConsumer::notifyFenceReady(const sp<Fence>& fence,
     } else {
         mSlots[slot].mPicoReadyFence = fence;
         mSlots[slot].mPicoFenceReady = true;
-        mCore->mPicoFenceCondition.notify_all();
+        pthread_cond_broadcast(&mCore->mPicoFenceCondition);
     }
     return NO_ERROR;
 }
@@ -552,7 +555,7 @@ status_t BufferQueueConsumer::connect(
     BQ_LOGV("connect: controlledByApp=%s",
             controlledByApp ? "true" : "false");
 
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
 
     if (mCore->mIsAbandoned) {
         BQ_LOGE("connect: BufferQueue has been abandoned");
@@ -570,7 +573,7 @@ status_t BufferQueueConsumer::disconnect() {
 
     BQ_LOGV("disconnect");
 
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
 
     if (mCore->mConsumerListener == nullptr) {
         BQ_LOGE("disconnect: no consumer is connected");
@@ -582,8 +585,8 @@ status_t BufferQueueConsumer::disconnect() {
     mCore->mQueue.clear();
     mCore->freeAllBuffersLocked();
     mCore->mSharedBufferSlot = BufferQueueCore::INVALID_BUFFER_SLOT;
-    mCore->mDequeueCondition.notify_all();
-    mCore->mPicoFenceCondition.notify_all();
+    pthread_cond_broadcast(&mCore->mDequeueCondition);
+    pthread_cond_broadcast(&mCore->mPicoFenceCondition);
     return NO_ERROR;
 }
 
@@ -595,7 +598,7 @@ status_t BufferQueueConsumer::getReleasedBuffers(uint64_t *outSlotMask) {
         return BAD_VALUE;
     }
 
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
 
     if (mCore->mIsAbandoned) {
         BQ_LOGE("getReleasedBuffers: BufferQueue has been abandoned");
@@ -637,7 +640,7 @@ status_t BufferQueueConsumer::setDefaultBufferSize(uint32_t width,
 
     BQ_LOGV("setDefaultBufferSize: width=%u height=%u", width, height);
 
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     mCore->mDefaultWidth = width;
     mCore->mDefaultHeight = height;
     return NO_ERROR;
@@ -651,7 +654,7 @@ status_t BufferQueueConsumer::setMaxBufferCount(int bufferCount) {
         return BAD_VALUE;
     }
 
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
 
     if (mCore->mConnectedApi != BufferQueueCore::NO_CONNECTED_API) {
         BQ_LOGE("setMaxBufferCount: producer is already connected");
@@ -691,8 +694,8 @@ status_t BufferQueueConsumer::setMaxAcquiredBufferCount(
 
     sp<IConsumerListener> listener;
     { // Autolock scope
-        std::unique_lock<std::mutex> lock(mCore->mMutex);
-        mCore->waitWhileAllocatingLocked(lock);
+        BufferQueueCore::MutexLock lock(mCore->mMutex);
+        mCore->waitWhileAllocatingLocked(&mCore->mMutex);
 
         if (mCore->mIsAbandoned) {
             BQ_LOGE("setMaxAcquiredBufferCount: consumer is abandoned");
@@ -752,7 +755,7 @@ status_t BufferQueueConsumer::setMaxAcquiredBufferCount(
 status_t BufferQueueConsumer::setConsumerName(const String8& name) {
     ATRACE_CALL();
     BQ_LOGV("setConsumerName: '%s'", name.string());
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     mCore->mConsumerName = name;
     mConsumerName = name;
     return NO_ERROR;
@@ -761,7 +764,7 @@ status_t BufferQueueConsumer::setConsumerName(const String8& name) {
 status_t BufferQueueConsumer::setDefaultBufferFormat(PixelFormat defaultFormat) {
     ATRACE_CALL();
     BQ_LOGV("setDefaultBufferFormat: %u", defaultFormat);
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     mCore->mDefaultBufferFormat = defaultFormat;
     return NO_ERROR;
 }
@@ -770,7 +773,7 @@ status_t BufferQueueConsumer::setDefaultBufferDataSpace(
         android_dataspace defaultDataSpace) {
     ATRACE_CALL();
     BQ_LOGV("setDefaultBufferDataSpace: %u", defaultDataSpace);
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     mCore->mDefaultBufferDataSpace = defaultDataSpace;
     return NO_ERROR;
 }
@@ -778,7 +781,7 @@ status_t BufferQueueConsumer::setDefaultBufferDataSpace(
 status_t BufferQueueConsumer::setConsumerUsageBits(uint64_t usage) {
     ATRACE_CALL();
     BQ_LOGV("setConsumerUsageBits: %#" PRIx64, usage);
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     mCore->mConsumerUsageBits = usage;
     return NO_ERROR;
 }
@@ -786,7 +789,7 @@ status_t BufferQueueConsumer::setConsumerUsageBits(uint64_t usage) {
 status_t BufferQueueConsumer::setConsumerIsProtected(bool isProtected) {
     ATRACE_CALL();
     BQ_LOGV("setConsumerIsProtected: %s", isProtected ? "true" : "false");
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     mCore->mConsumerIsProtected = isProtected;
     return NO_ERROR;
 }
@@ -794,26 +797,26 @@ status_t BufferQueueConsumer::setConsumerIsProtected(bool isProtected) {
 status_t BufferQueueConsumer::setTransformHint(uint32_t hint) {
     ATRACE_CALL();
     BQ_LOGV("setTransformHint: %#x", hint);
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     mCore->mTransformHint = hint;
     return NO_ERROR;
 }
 
 status_t BufferQueueConsumer::getSidebandStream(sp<NativeHandle>* outStream) const {
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     *outStream = mCore->mSidebandStream;
     return NO_ERROR;
 }
 
 status_t BufferQueueConsumer::getOccupancyHistory(bool forceFlush,
         std::vector<OccupancyTracker::Segment>* outHistory) {
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     *outHistory = mCore->mOccupancyTracker.getSegmentHistory(forceFlush);
     return NO_ERROR;
 }
 
 status_t BufferQueueConsumer::discardFreeBuffers() {
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    BufferQueueCore::MutexLock lock(mCore->mMutex);
     mCore->discardFreeBuffersLocked();
     return NO_ERROR;
 }

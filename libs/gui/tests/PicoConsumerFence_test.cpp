@@ -137,7 +137,7 @@ protected:
         std::promise<void> entered;
         auto ready = entered.get_future();
         std::thread wait([&] {
-            std::unique_lock<std::mutex> lock(core->mMutex);
+            BufferQueueCore::MutexLock lock(core->mMutex);
             entered.set_value();
             producer->waitForFenceReadyBufferLocked(slot, fence);
         });
@@ -146,8 +146,8 @@ protected:
             EXPECT_EQ(NO_ERROR, consumer->notifyFenceReady(*fence, id, slot));
         } else {
             // This lock can only be obtained once wait has released the mutex.
-            std::lock_guard<std::mutex> lock(core->mMutex);
-            core->mPicoFenceCondition.notify_all();
+            BufferQueueCore::MutexLock lock(core->mMutex);
+            pthread_cond_broadcast(&core->mPicoFenceCondition);
         }
         wait.join();
     }

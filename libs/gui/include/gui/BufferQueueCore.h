@@ -31,8 +31,8 @@
 
 #include <list>
 #include <set>
-#include <mutex>
-#include <condition_variable>
+
+#include <pthread.h>
 
 #define BQ_LOGV(x, ...) ALOGV("[%s] " x, mConsumerName.string(), ##__VA_ARGS__)
 #define BQ_LOGD(x, ...) ALOGD("[%s] " x, mConsumerName.string(), ##__VA_ARGS__)
@@ -86,6 +86,23 @@ public:
 
 private:
     friend class PicoConsumerFenceTest;
+
+    // Scoped lock of mMutex. The factory (later CAF) BufferQueueCore keeps mMutex as a
+    // priority-inheritance pthread_mutex_t and the conditions as pthread_cond_t; the
+    // factory library calls pthread_mutex_lock/unlock directly.
+    class MutexLock {
+    public:
+        explicit MutexLock(pthread_mutex_t& mutex) : mMutex(mutex) {
+            pthread_mutex_lock(&mMutex);
+        }
+        ~MutexLock() { pthread_mutex_unlock(&mMutex); }
+        MutexLock(const MutexLock&) = delete;
+        MutexLock& operator=(const MutexLock&) = delete;
+
+    private:
+        pthread_mutex_t& mMutex;
+    };
+
     // Dump our state in a string
     void dumpState(const String8& prefix, String8* outResult) const;
 
@@ -135,8 +152,9 @@ private:
     // away slots. Returns false if the request can't be met.
     bool adjustAvailableSlotsLocked(int delta);
 
-    // waitWhileAllocatingLocked blocks until mIsAllocating is false.
-    void waitWhileAllocatingLocked(std::unique_lock<std::mutex>& lock) const;
+    // waitWhileAllocatingLocked blocks until mIsAllocating is false. The caller holds
+    // mutex (mMutex).
+    void waitWhileAllocatingLocked(pthread_mutex_t* mutex) const;
 
 #if DEBUG_ONLY_CODE
     // validateConsistencyLocked ensures that the free lists are in sync with
@@ -146,8 +164,8 @@ private:
 
     // mMutex is the mutex used to prevent concurrent access to the member
     // variables of BufferQueueCore objects. It must be locked whenever any
-    // member variable is accessed.
-    mutable std::mutex mMutex;
+    // member variable is accessed. It is created with PTHREAD_PRIO_INHERIT.
+    mutable pthread_mutex_t mMutex;
 
     // mIsAbandoned indicates that the BufferQueue will no longer be used to
     // consume image buffers pushed to it using the IGraphicBufferProducer
@@ -225,8 +243,10 @@ private:
 
     // mDequeueCondition is a condition variable used for dequeueBuffer in
     // synchronous mode.
-    mutable std::condition_variable mDequeueCondition;
-    mutable std::condition_variable mPicoFenceCondition;
+    mutable pthread_cond_t mDequeueCondition;
+    // PICO: signalled when a consumer reports a ready fence (notifyFenceReady) and on
+    // disconnect. Waited on with mMutex by BufferQueueProducer::waitForFenceReadyBufferLocked.
+    mutable pthread_cond_t mPicoFenceCondition;
 
     // mDequeueBufferCannotBlock indicates whether dequeueBuffer is allowed to
     // block. This flag is set during connect when both the producer and
@@ -300,7 +320,7 @@ private:
 
     // mIsAllocatingCondition is a condition variable used by producers to wait until mIsAllocating
     // becomes false.
-    mutable std::condition_variable mIsAllocatingCondition;
+    mutable pthread_cond_t mIsAllocatingCondition;
 
     // mAllowAllocation determines whether dequeueBuffer is allowed to allocate
     // new buffers

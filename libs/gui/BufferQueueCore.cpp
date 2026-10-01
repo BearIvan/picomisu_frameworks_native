@@ -55,7 +55,7 @@ static uint64_t getUniqueId() {
 }
 
 BufferQueueCore::BufferQueueCore() :
-    mMutex(),
+    mMutex(PTHREAD_MUTEX_INITIALIZER),
     mIsAbandoned(false),
     mConsumerControlledByApp(false),
     mConsumerName(getUniqueName()),
@@ -72,8 +72,9 @@ BufferQueueCore::BufferQueueCore() :
     mFreeBuffers(),
     mUnusedSlots(),
     mActiveBuffers(),
-    mDequeueCondition(),
-    mPicoFenceCondition(),
+    mDequeueCondition(PTHREAD_COND_INITIALIZER),
+    // The factory constructor leaves this condition uninitialized; it is zeroed here.
+    mPicoFenceCondition(PTHREAD_COND_INITIALIZER),
     mDequeueBufferCannotBlock(false),
     mQueueBufferCanDrop(false),
     mLegacyBufferDrop(true),
@@ -88,7 +89,7 @@ BufferQueueCore::BufferQueueCore() :
     mFrameCounter(0),
     mTransformHint(0),
     mIsAllocating(false),
-    mIsAllocatingCondition(),
+    mIsAllocatingCondition(PTHREAD_COND_INITIALIZER),
     mAllowAllocation(true),
     mBufferAge(0),
     mGenerationNumber(0),
@@ -113,12 +114,27 @@ BufferQueueCore::BufferQueueCore() :
             s++) {
         mUnusedSlots.push_front(s);
     }
+
+    // Factory (later CAF): mMutex is a priority-inheritance mutex. On failure the
+    // statically initialized default mutex stays in use.
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    if (pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT) != 0) {
+        BQ_LOGE("BQ mutexattr setprotocol failed");
+        return;
+    }
+    if (pthread_mutex_init(&mMutex, &attr) != 0) {
+        BQ_LOGE("BQ mutex init failed");
+        return;
+    }
+    mDequeueCondition = PTHREAD_COND_INITIALIZER;
+    mIsAllocatingCondition = PTHREAD_COND_INITIALIZER;
 }
 
 BufferQueueCore::~BufferQueueCore() {}
 
 void BufferQueueCore::dumpState(const String8& prefix, String8* outResult) const {
-    std::lock_guard<std::mutex> lock(mMutex);
+    MutexLock lock(mMutex);
 
     outResult->appendFormat("%s- BufferQueue ", prefix.string());
     outResult->appendFormat("mMaxAcquiredBufferCount=%d mMaxDequeuedBufferCount=%d\n",
@@ -324,10 +340,10 @@ bool BufferQueueCore::adjustAvailableSlotsLocked(int delta) {
     return true;
 }
 
-void BufferQueueCore::waitWhileAllocatingLocked(std::unique_lock<std::mutex>& lock) const {
+void BufferQueueCore::waitWhileAllocatingLocked(pthread_mutex_t* mutex) const {
     ATRACE_CALL();
     while (mIsAllocating) {
-        mIsAllocatingCondition.wait(lock);
+        pthread_cond_wait(&mIsAllocatingCondition, mutex);
     }
 }
 

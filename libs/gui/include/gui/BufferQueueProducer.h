@@ -18,8 +18,12 @@
 #define ANDROID_GUI_BUFFERQUEUEPRODUCER_H
 
 #include <atomic>
+#include <condition_variable>
 #include <map>
 #include <memory>
+#include <mutex>
+
+#include <pthread.h>
 #include <gui/BufferQueueDefs.h>
 #include <gui/IGraphicBufferProducer.h>
 
@@ -208,6 +212,12 @@ private:
     void fetchBufferLocked(uint64_t bufferId, sp<GraphicBuffer>* buffer);
     void cacheBufferLocked(const sp<GraphicBuffer>& buffer);
     void evictBuffer();
+    // Factory cached-buffer helpers (0x77548 / 0x7755c / 0x77590). getCounter returns the
+    // next process-wide cache access stamp; clearAllCachedBuffersLocked empties mBufferCache
+    // (disconnect); dumpBuffers logs the cache.
+    static uint64_t getCounter();
+    void clearAllCachedBuffersLocked();
+    void dumpBuffers();
     void waitForFenceReadyBufferLocked(int slot, sp<Fence>* outFence);
 
     // Returns the next free slot if one is available or
@@ -221,14 +231,14 @@ private:
     // block if there are no available slots and we are not in non-blocking
     // mode (producer and consumer controlled by the application). If it blocks,
     // it will release mCore->mMutex while blocked so that other operations on
-    // the BufferQueue may succeed.
+    // the BufferQueue may succeed. The caller holds mutex (mCore->mMutex).
     enum class FreeSlotCaller {
         Dequeue,
         Attach,
     };
     // PICO: outBufferReleased (dequeue only) is set when the autobuffercount logic freed an
     // idle buffer; the caller then tells the consumer with onBuffersReleased().
-    status_t waitForFreeSlotThenRelock(FreeSlotCaller caller, std::unique_lock<std::mutex>& lock,
+    status_t waitForFreeSlotThenRelock(FreeSlotCaller caller, pthread_mutex_t* mutex,
             int* found, bool* outBufferReleased = nullptr) const;
 
     sp<BufferQueueCore> mCore;
@@ -274,8 +284,8 @@ private:
     bool mDequeueWaitingForAllocation;
 
     // Condition variable to signal allocateBuffers() that dequeueBuffer() is no longer waiting for
-    // allocation to complete.
-    std::condition_variable mDequeueWaitingForAllocationCondition;
+    // allocation to complete. Waited on with mCore->mMutex.
+    pthread_cond_t mDequeueWaitingForAllocationCondition = PTHREAD_COND_INITIALIZER;
 
     bool mPicoFenceReadyMode = false;
     // Protected by the queue mutex. PICO retains at most five recent buffers.
