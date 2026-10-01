@@ -237,6 +237,15 @@ public:
     virtual status_t attachBuffer(int* slot, const sp<GraphicBuffer>& buffer) {
         Parcel data, reply;
         data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
+        // PICO: a buffer with the private usage bit 32 (usage & 0xf00000000 == 0x100000000)
+        // carries its id first, so that the remote queue can attach its cached copy
+        // (attachCachedBuffer) instead of importing the handle again; 0 for any other buffer.
+        // The buffer itself always follows, as in the factory PICO OS 5.13.7.
+        uint64_t id = 0;
+        if ((buffer->getUsage() & 0xf00000000ULL) == 0x100000000ULL) {
+            id = buffer->getId();
+        }
+        data.writeUint64(id);
         data.write(*buffer.get());
         status_t result = remote()->transact(ATTACH_BUFFER, data, &reply);
         if (result != NO_ERROR) {
@@ -852,11 +861,27 @@ status_t BnGraphicBufferProducer::onTransact(
         }
         case ATTACH_BUFFER: {
             CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
-            sp<GraphicBuffer> buffer = new GraphicBuffer();
-            status_t result = data.read(*buffer.get());
             int slot = 0;
-            if (result == NO_ERROR) {
-                result = attachBuffer(&slot, buffer);
+            sp<GraphicBuffer> buffer;
+            uint64_t id = 0;
+            data.readUint64(&id);
+            status_t result;
+            if (id != 0) {
+                // PICO cached attach, as in the factory PICO OS 5.13.7: try the queue's cached
+                // buffer first; only when it does not know the id, unflatten the buffer that
+                // follows (the read status is not checked, as in the factory) and cache it.
+                result = attachCachedBuffer(&slot, buffer, id);
+                if (result == NAME_NOT_FOUND) {
+                    buffer = new GraphicBuffer();
+                    data.read(*buffer.get());
+                    result = attachCachedBuffer(&slot, buffer, id);
+                }
+            } else {
+                buffer = new GraphicBuffer();
+                result = data.read(*buffer.get());
+                if (result == NO_ERROR) {
+                    result = attachBuffer(&slot, buffer);
+                }
             }
             reply->writeInt32(slot);
             reply->writeInt32(result);
