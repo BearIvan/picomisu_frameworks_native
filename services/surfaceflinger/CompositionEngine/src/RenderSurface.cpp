@@ -245,7 +245,9 @@ status_t RenderSurface::attachBuffer(sp<GraphicBuffer>& buffer) {
     if (result != NO_ERROR) {
         buffer->usage &= ~mask;
         mGraphicBuffer.clear();
-        ALOGE("Error attaching direct buffer for display [%s]: %d", mDisplay.getName().c_str(), result);
+        // Factory 0x12c3b8 message.
+        ALOGE("ANativeWindow::attachBuffer failed for display [%s] with error: %d",
+              mDisplay.getName().c_str(), result);
     } else {
         mGraphicBuffer = buffer;
     }
