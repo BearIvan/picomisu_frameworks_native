@@ -562,6 +562,8 @@ inline static const char *asString(OMX_INDEXEXTTYPE i, const char *def = "??") {
         case OMX_IndexConfigOperatingRate:              return "ConfigOperatingRate";
         case OMX_IndexParamConsumerUsageBits:           return "ParamConsumerUsageBits";
         case OMX_IndexConfigLatency:                    return "ConfigLatency";
+        // PICO (factory PICO OS 5.13.7 libstagefright_omx)
+        case OMX_IndexConfigSyncVRTypeDetect:           return "ConfigSyncVRTypeDetect";
         default:                                        return asString((OMX_INDEXTYPE)i, def);
     }
 }
