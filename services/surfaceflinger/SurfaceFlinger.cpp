@@ -2531,8 +2531,9 @@ void SurfaceFlinger::logLayerStats() {
 // (SINGLE_BUFFER) mode and may be refreshed without a new frame. Not while
 // debug.sf.ignore.autorefresh is set or while a virtual display shows layer stack 0 (screen
 // recording and cast keep the normal frame flow). `cast` reports whether a dual cast display
-// exists. As on the factory the displays are passed by value.
-static bool getAutoRefresh(const sp<const Layer>& layer,
+// exists. As on the factory the displays are passed by value and the function has external
+// linkage.
+bool getAutoRefresh(const sp<const Layer>& layer,
                            std::map<wp<IBinder>, sp<DisplayDevice>> displays, bool& cast) {
     char value[PROPERTY_VALUE_MAX];
     property_get("debug.sf.ignore.autorefresh", value, "0");
@@ -2544,7 +2545,7 @@ static bool getAutoRefresh(const sp<const Layer>& layer,
         if (display->isDualCast()) {
             cast = true;
         }
-        if (display->isVirtual() && display->getCompositionDisplay()->getState().layerStackId == 0) {
+        if (display->isVirtual() && display->getLayerStack() == 0) {
             return false;
         }
     }
