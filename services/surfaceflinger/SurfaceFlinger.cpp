@@ -7709,6 +7709,8 @@ void SurfaceFlinger::setAllowedDisplayConfigsInternal(const sp<DisplayDevice>& d
     const auto allowedDisplayConfigs = DisplayConfigs(displayConfigs.begin(),
                                                       displayConfigs.end());
     if (allowedDisplayConfigs == mAllowedDisplayConfigs) {
+        // PICO (factory setAllowedDisplayConfigs lambda 0x109414)
+        ALOGW("%s direct return", __func__);
         return;
     }
 
